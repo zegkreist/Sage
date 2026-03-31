@@ -10,7 +10,8 @@ import { WebSearch } from "./src/web-search.js";
 export class AllFather {
   constructor(config = {}) {
     const hostIp = process.env.HOST_IP || "localhost";
-    const ollamaBase =  `http://${hostIp}:11434` || config.ollamaUrl || process.env.OLLAMA_URL
+    const defaultBase = `http://${hostIp}:11434`;
+    const ollamaBase = config.ollamaUrl || process.env.OLLAMA_URL || defaultBase;
     this.ollamaUrl = ollamaBase;
     this.model = config.model || process.env.OLLAMA_DEFAULT_MODEL || "deepseek-r1:14b-qwen-distill-q4_K_M";
     this.temperature = config.temperature ?? 0.7;
@@ -93,8 +94,8 @@ export class AllFather {
     let finalPrompt = question;
     const disableReasoning = options.disableReasoning ?? this.disableReasoning;
 
-    // Se reasoning está desabilitado e é um modelo deepseek, adiciona instrução
-    if (disableReasoning && (this.model.includes("deepseek") || (options.model && options.model.includes("deepseek")))) {
+    // Se reasoning está desabilitado, adiciona instrução para evitar thinking tokens
+    if (disableReasoning) {
       finalPrompt = `You must respond directly without showing your thinking process. Do not use <think> tags or show reasoning. Just provide the final answer immediately.\n\n${question}`;
     }
 
@@ -193,14 +194,27 @@ export class AllFather {
     });
 
     try {
-      // Tenta extrair JSON da resposta
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+      // Remove thinking tokens (<think>...</think>) de modelos como qwen3, deepseek-r1
+      let cleaned = response.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+      // Remove markdown code fences (```json ... ``` ou ``` ... ```)
+      const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (fenceMatch) cleaned = fenceMatch[1].trim();
+
+      // Tenta extrair array JSON primeiro (resposta mais comum para listas)
+      const arrayMatch = cleaned.match(/(\[[\s\S]*\])/);
+      if (arrayMatch) {
+        try { return JSON.parse(arrayMatch[1]); } catch {}
       }
 
-      // Tenta parsear a resposta diretamente
-      return JSON.parse(response);
+      // Tenta extrair objeto JSON
+      const objMatch = cleaned.match(/(\{[\s\S]*\})/);
+      if (objMatch) {
+        return JSON.parse(objMatch[1]);
+      }
+
+      // Tenta parsear a resposta limpa diretamente
+      return JSON.parse(cleaned);
     } catch (error) {
       throw new Error(`Falha ao parsear JSON da resposta: ${response}`);
     }

@@ -44,6 +44,7 @@ plex_server/
     ├── Stormbringer/          # Agente de torrent — busca, download e organização no Plex
     ├── TideCaller/            # Download de alta qualidade via Tidal (streamrip, Dockerizado)
     └── Transporter/           # Utilitários compartilhados de filesystem, strings e áudio
+    └── MusicSage/             # Webserver de recomendações musicais + construtor de playlists
 ```
 
 ---
@@ -62,6 +63,63 @@ Organiza e normaliza a biblioteca de músicas em `music/`.
 - Corrige tags `ALBUM` nos arquivos via `ffmpeg` quando divergem da pasta
 - Consolida faixas duplicadas e remove pastas vazias
 - Todos os comandos têm modo `--dry-run`
+
+### MusicSage (`@plex-agents/musicsage`)
+Webserver Express.js de recomendações musicais com **frontend SPA** integrado. Roda na porta `3001`.
+
+**O que faz:**
+- Escaneia a biblioteca Plex via API → artistas, álbuns, faixas
+- Analisa perfil musical com AllFather (Ollama) → gênero, mood, energia, timbre
+- Lê histórico de plays do Plex para entender gostos do usuário
+- **Recomenda artistas** fora da biblioteca que combinam com o perfil analisado
+- **Constrói playlists** da biblioteca por critérios (mood, gênero, energia) ou via **prompt em linguagem natural**
+- **Frontend SPA dark-theme** acessível em `http://localhost:3001`
+
+**Seções do frontend:**
+| Seção | Função |
+|---|---|
+| Dashboard | Cards com totais da biblioteca (artistas/álbuns/faixas), top gêneros e status do servidor |
+| Recomendações | Grid de artistas recomendados com filtro por gênero + botão Atualizar |
+| Playlists | Lista de playlists salvas — expande para ver faixas, renomear inline, remover faixas, excluir |
+| Nova Playlist | Duas tabs: "Por Critérios" (mood + gênero + energia + tamanho) e "Por Prompt" (texto livre interpretado pelo Ollama) |
+
+**Como iniciar:**
+```bash
+# Via CLI central
+node plex-cli.js musicsage:start
+
+# Ou direto
+cd agents/MusicSage && node index.js
+
+# Abrir Interface Web
+xdg-open http://localhost:3001
+```
+
+**Variáveis de ambiente necessárias:**
+```env
+PLEX_URL=http://localhost:32400
+PLEX_TOKEN=<token-do-plex>
+OLLAMA_URL=http://localhost:11434
+OLLAMA_DEFAULT_MODEL=deepseek-r1:14b-qwen-distill-q4_K_M
+MUSICSAGE_PORT=3001             # opcional, padrão 3001
+```
+
+**API REST** (para uso programático):
+```
+GET  /api/health                         → status do servidor
+GET  /api/library/stats                  → totais + top géneros
+GET  /api/recommendations?limit=N        → artistas recomendados
+POST /api/playlists/generate             → { name?, mood?, genre?, energy?, size? }
+POST /api/playlists/from-prompt          → { prompt: "texto livre" }
+GET  /api/playlists                      → lista playlists salvas
+GET  /api/playlists/:id                  → playlist por id
+PATCH /api/playlists/:id                 → { name?, tracks? } — editar
+DELETE /api/playlists/:id                → remove
+```
+
+**Persistência:** playlists salvas em `mediasage/playlists/playlists.json`
+
+**Arquitetura:** 5 serviços por DI — `LibraryScanner`, `HistoryService`, `MusicAnalyzer`, `RecommendationEngine`, `PlaylistBuilder`. 68 testes (unit + integração).
 
 ### SeriesCurator (`@plex-agents/seriescurator`)
 Organiza e renomeia séries de TV em `tv/`.
@@ -126,6 +184,12 @@ npm run <comando>
 | `music:fix-all-tags` / `:dry` | Corrige tags ALBUM em toda a biblioteca |
 | `music:fix-tags` / `:dry` | Corrige tags apenas nos álbuns já marcados `[CURATED]` |
 | `music:test` | Suite de testes do MusicCurator |
+
+### MusicSage
+| Comando | Descrição |
+|---|---|
+| `musicsage:start` | Inicia o servidor MusicSage (porta 3001) |
+| `musicsage:test` | Suite de testes do MusicSage (68 testes) |
 
 ### Séries
 | Comando | Descrição |

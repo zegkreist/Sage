@@ -6,6 +6,7 @@
   "workspaces": [
     "agents/AllFather",
     "agents/MusicCurator",
+    "agents/MusicSage",
     "agents/SeriesCurator",
     "agents/Stormbringer",
     "agents/Transporter"
@@ -41,7 +42,11 @@
     "plex:stop": "node plex-cli.js plex:stop",
     "plex:scan": "node plex-cli.js plex:scan",
     "plex:logs": "node plex-cli.js plex:logs",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathPattern=tests/"
+    "plex:get-token": "node scripts/get-plex-token.js",
+    "kill-port": "node scripts/kill-port.js",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand --testPathPattern=tests/",
+    "musicsage:start": "node plex-cli.js musicsage:start",
+    "musicsage:test": "node plex-cli.js musicsage:test"
   },
   "jest": {
     "transform": {}

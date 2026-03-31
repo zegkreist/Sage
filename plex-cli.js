@@ -59,6 +59,7 @@ const MOVIE_DIR = path.join(ROOT, "agents", "MovieCurator");
 const STORMBRINGER_DIR = path.join(ROOT, "agents", "Stormbringer");
 const TIDECALLER_DIR = path.join(ROOT, "agents", "TideCaller");
 const TRANSPORTER_DIR = path.join(ROOT, "agents", "Transporter");
+const MUSICSAGE_DIR = path.join(ROOT, "agents", "MusicSage");
 
 /**
  * Cada entrada:
@@ -352,6 +353,24 @@ const COMMANDS = [
     args: ["setup/run_tests.sh"],
   },
 
+  // ── MusicSage ────────────────────────────────────────────────────────────────
+  {
+    id: "musicsage:start",
+    label: "Iniciar MusicSage (webserver de recomendação + playlist builder)",
+    group: "🧠  MusicSage",
+    cwd: MUSICSAGE_DIR,
+    cmd: "node",
+    args: ["index.js"],
+  },
+  {
+    id: "musicsage:test",
+    label: "Rodar testes do MusicSage (unitários + integração)",
+    group: "🧠  MusicSage",
+    cwd: MUSICSAGE_DIR,
+    cmd: "npm",
+    args: ["test"],
+  },
+
   // ── Testes ───────────────────────────────────────────────────────────────────
   {
     id: "test:all",
@@ -438,6 +457,14 @@ const COMMANDS = [
       // Usa a API local do Plex para disparar um refresh
       `curl -s -o /dev/null -w "HTTP %{http_code}" "http://localhost:32400/library/sections/all/refresh?X-Plex-Token=${process.env.PLEX_TOKEN || ""}" && echo " — Scan disparado"`,
     ],
+  },
+  {
+    id: "plex:get-token",
+    label: "Ler token do Plex e salvar no .env",
+    group: "🐳  Docker / Plex",
+    cwd: ROOT,
+    cmd: "node",
+    args: ["scripts/get-plex-token.js"],
   },
 ];
 
