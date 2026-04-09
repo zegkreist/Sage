@@ -18,10 +18,12 @@
  *   Artist - Album (Year) [quality]/track  (streamrip/Tidal)
  *
  * Uso:
- *   node src/run.js              → move tudo
+ *   node src/run.js              → move tudo (música + filmes + séries)
  *   node src/run.js --dry-run    → apenas simula, sem mover
  *   node src/run.js --music      → apenas música (Tidal + torrents)
- *   node src/run.js --video      → apenas filmes e séries (torrents)
+ *   node src/run.js --movies     → apenas filmes (torrents)
+ *   node src/run.js --series     → apenas séries (torrents)
+ *   node src/run.js --video      → filmes e séries via plexOrganizer.js (legado)
  */
 
 import path from "path";
@@ -39,6 +41,7 @@ const dryRun = args.includes("--dry-run") || args.includes("-d");
 const onlyMusic = args.includes("--music");
 const onlyVideo = args.includes("--video");
 const onlyMovies = args.includes("--movies");
+const onlySeries = args.includes("--series");
 const verbose = args.includes("--verbose") || args.includes("-v");
 
 const C = {
@@ -105,10 +108,17 @@ async function runMovies() {
   organizer.printStats();
 }
 
+async function runSeries() {
+  const extraArgs = dryRun ? ["--dry-run"] : ["--yes", "--series-only"];
+  const stormbringerDir = path.join(PLEX_ROOT, "agents", "Stormbringer");
+  await spawnAsync("node", ["src/plexOrganizer.js", ...extraArgs], stormbringerDir, "Séries (Torrent → library)");
+}
+
+// Legado: mantido para compatibilidade com chamadas diretas --video
 async function runVideo() {
   const extraArgs = dryRun ? ["--dry-run"] : ["--yes"];
   const stormbringerDir = path.join(PLEX_ROOT, "agents", "Stormbringer");
-  await spawnAsync("node", ["src/plexOrganizer.js", ...extraArgs], stormbringerDir, "Vídeo (Torrent → library)");
+  await spawnAsync("node", ["src/plexOrganizer.js", ...extraArgs], stormbringerDir, "Vídeo — filmes e séries (Torrent → library)");
 }
 
 async function main() {
@@ -117,12 +127,13 @@ async function main() {
     console.log(`${C.yellow}🔍 Modo DRY RUN — nenhum arquivo será movido${C.reset}\n`);
   }
 
-  const runAll = !onlyMusic && !onlyVideo && !onlyMovies;
+  const runAll = !onlyMusic && !onlyVideo && !onlyMovies && !onlySeries;
 
   try {
     if (runAll || onlyMusic) await runMusic();
     if (runAll || onlyMovies) await runMovies();
-    if (runAll || onlyVideo) await runVideo();
+    if (runAll || onlySeries) await runSeries();
+    if (onlyVideo) await runVideo(); // legado: --video ainda funciona explicitamente
     console.log(`\n${C.bold}${C.green}✅ Transporter concluído!${C.reset}\n`);
   } catch (err) {
     console.error(`\n${C.red}❌ Erro no Transporter: ${err.message}${C.reset}\n`);

@@ -525,10 +525,10 @@ export function toolsRouter(router) {
   });
 
   // ── POST /api/tools/transporter/run ──────────────────────────────────────
-  // Body: { type: "music" | "movies" | "all" }
+  // Body: { type: "music" | "movies" | "series" | "all" }
   router.post("/tools/transporter/run", async (req, res) => {
     const { type = "music" } = req.body || {};
-    const flagMap = { music: ["--music"], movies: ["--movies"], series: ["--video"], all: [] };
+    const flagMap = { music: ["--music"], movies: ["--movies"], series: ["--series"], all: [] };
     const flags = flagMap[type] ?? ["--music"];
 
     try {

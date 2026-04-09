@@ -141,12 +141,27 @@ class PlexOrganizer {
       if (stats.isDirectory()) {
         // Procurar arquivos de vídeo dentro da pasta
         const videoFiles = this.findVideoFiles(itemPath);
+        let movedFromDir = 0;
 
         for (const videoFile of videoFiles) {
           const episodeInfo = this.parseEpisodeName(path.basename(videoFile));
           if (episodeInfo) {
             await this.organizeEpisodeFile(videoFile, episodeInfo, itemPath);
             processed++;
+            movedFromDir++;
+          }
+        }
+
+        // Limpar pasta de origem após mover todos os episódios
+        if (fs.existsSync(itemPath)) {
+          const remaining = fs.readdirSync(itemPath).filter(f => !f.startsWith('.'));
+          if (movedFromDir > 0 || remaining.length === 0) {
+            try {
+              fs.rmSync(itemPath, { recursive: true, force: true });
+              console.log(`🗑️  Pasta removida: ${item}`);
+            } catch (err) {
+              console.error(`⚠️  Não foi possível remover a pasta "${item}": ${err.message}`);
+            }
           }
         }
       } else if (this.isVideoFile(itemPath)) {
@@ -630,6 +645,7 @@ class PlexOrganizer {
     }
 
     // ── séries ──────────────────────────────────────────────────────────────
+    const emptySeriesDirs = [];
     if (fs.existsSync(this.sourceSeries)) {
       for (const item of fs.readdirSync(this.sourceSeries)) {
         const itemPath = path.join(this.sourceSeries, item);
@@ -637,7 +653,12 @@ class PlexOrganizer {
         
         if (stats.isDirectory()) {
           // Processar vídeos dentro de pastas
-          for (const videoFile of this.findVideoFiles(itemPath)) {
+          const videoFiles = this.findVideoFiles(itemPath);
+          if (videoFiles.length === 0) {
+            const remaining = fs.readdirSync(itemPath).filter(f => !f.startsWith('.'));
+            if (remaining.length === 0) emptySeriesDirs.push(item);
+          }
+          for (const videoFile of videoFiles) {
             const info = this.parseEpisodeName(path.basename(videoFile));
             if (!info) continue;
             const showFolder = this.sanitizeName(info.showName + (info.year ? ` (${info.year})` : ""));
@@ -728,12 +749,27 @@ class PlexOrganizer {
         console.log(`     → ${p.dest}\n`);
       }
     }
-    if (byType.series.length) {
+    if (byType.series.length || emptySeriesDirs.length) {
       console.log("\n📺 SÉRIES:\n");
+      // Agrupar por pasta de origem (item direto dentro de sourceSeries)
+      const dirGroups = new Map();
       for (const p of byType.series) {
-        console.log(`  📺 ${p.label}`);
-        console.log(`     ${p.source}`);
-        console.log(`     → ${p.dest}\n`);
+        const rel = path.relative(this.sourceSeries, p.source);
+        const topDir = rel.split(path.sep)[0];
+        if (!dirGroups.has(topDir)) dirGroups.set(topDir, []);
+        dirGroups.get(topDir).push(p);
+      }
+      for (const [dir, episodes] of dirGroups) {
+        console.log(`  📁 ${dir}  [${episodes.length} episódio(s)]`);
+        for (const p of episodes) {
+          console.log(`     📺 ${p.label}`);
+          console.log(`        → ${p.dest}`);
+        }
+        console.log(`     🗑️  Pasta será removida após mover\n`);
+      }
+      for (const dir of emptySeriesDirs) {
+        console.log(`  📁 ${dir}  [vazia]`);
+        console.log(`     🗑️  Pasta vazia será removida\n`);
       }
     }
     if (byType.music.length) {
@@ -760,6 +796,9 @@ async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run") || args.includes("-d");
   const yes = args.includes("--yes") || args.includes("-y");
+  // Flags de escopo parcial (invocados pelo Transporter via MusicSage)
+  const seriesOnly = args.includes("--series-only");
+  const moviesOnly = args.includes("--movies-only");
 
   // Carregar config
   const configPath = path.join(__dirname, "../config.json");
@@ -787,7 +826,17 @@ async function main() {
     }
   }
 
-  await organizer.organize();
+  if (seriesOnly) {
+    console.log("\n📺 Organizando séries...\n");
+    await organizer.organizeSeries();
+    console.log("\n✅ Séries organizadas!\n");
+  } else if (moviesOnly) {
+    console.log("\n📽️  Organizando filmes...\n");
+    await organizer.organizeMovies();
+    console.log("\n✅ Filmes organizados!\n");
+  } else {
+    await organizer.organize();
+  }
 }
 
 // Executar se chamado diretamente
