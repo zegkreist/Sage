@@ -5,10 +5,10 @@ import { fileURLToPath } from "url";
 import { logger } from "../logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Pasta de dados: ../../mediasage/playlists/ (relativa ao agent)
+// Pasta de dados: data/playlists/ (relativa ao root do musicsage)
 const PLAYLISTS_DIR = process.env.DATA_DIR
   ? join(process.env.DATA_DIR, "playlists")
-  : join(__dirname, "../../../mediasage/playlists");
+  : join(__dirname, "../../data/playlists");
 const PLAYLISTS_FILE = join(PLAYLISTS_DIR, "playlists.json");
 
 /**

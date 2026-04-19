@@ -18,7 +18,7 @@ import { buildGenreContext } from "../genreVocabulary.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EMBEDDINGS_DIR  = process.env.DATA_DIR
   ? join(process.env.DATA_DIR, "embeddings")
-  : join(__dirname, "../../../mediasage/embeddings");
+  : join(__dirname, "../../data/embeddings");
 const EMBEDDINGS_FILE = join(EMBEDDINGS_DIR, "track-embeddings.json");
 
 const BATCH_DELAY_MS = 50; // pausa entre faixas para não sobrecarregar Ollama

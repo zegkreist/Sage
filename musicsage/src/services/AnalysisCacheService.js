@@ -31,7 +31,7 @@ import { fileURLToPath }               from "url";
 import { logger }                       from "../logger.js";
 
 const __dirname   = dirname(fileURLToPath(import.meta.url));
-const _DATA_DIR  = process.env.DATA_DIR || join(__dirname, "../../../mediasage");
+const _DATA_DIR  = process.env.DATA_DIR || join(__dirname, "../../data");
 const CACHE_FILE  = join(_DATA_DIR, "analysis-cache.json");
 const CACHE_DIR   = dirname(CACHE_FILE);
 const CACHE_VERSION = 1;

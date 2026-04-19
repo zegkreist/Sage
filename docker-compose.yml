@@ -40,7 +40,7 @@ services:
       - PLEX_MEDIA_PATH=/media
       - LASTFM_API_KEY=${LASTFM_API_KEY:-}
     volumes:
-      - musicsage-data:/data
+      - ./musicsage/data:/data
       - ./musicsage-logs:/data/logs
       - ./config:/plex-config:ro
       - ./music:/media/music:ro
@@ -51,5 +51,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  musicsage-data:
   musicsage-downloads:
