@@ -116,7 +116,7 @@
   }
 </script>
 
-<div class="p-6 w-full animate-fade-in space-y-5">
+<div class="p-6 w-full min-h-full animate-fade-in space-y-5">
 
   <!-- Header -->
   <div class="flex items-end justify-between gap-4">

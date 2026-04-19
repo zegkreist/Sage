@@ -185,7 +185,8 @@
   async function loadPending() {
     try {
       const r = await api('GET', '/tools/transporter/pending');
-      tpPending = r?.files ?? r ?? [];
+      // Backend returns [{name, icon, type, count, items:[]}]
+      tpPending = Array.isArray(r) ? r : [];
     } catch { tpPending = []; }
   }
 
@@ -200,20 +201,21 @@
 
   // ─── Status helpers ──────────────────────────────────────
   function torrentPct(t) {
-    if (t.progress != null) return Math.round(t.progress * 100);
+    // DownloadManager stores progress as 0-100 (already multiplied)
+    if (t.progress != null) return Math.min(100, Math.round(t.progress));
     if (t.total && t.downloaded) return Math.round((t.downloaded / t.total) * 100);
     return 0;
   }
 
   function torrentStatusClass(t) {
     const s = (t.status ?? '').toLowerCase();
-    if (s.includes('done') || s.includes('seeding') || t.progress >= 1) return 'text-emerald-400';
+    if (s.includes('done') || s.includes('seeding') || t.progress >= 100) return 'text-emerald-400';
     if (s.includes('error') || s.includes('fail')) return 'text-red-400';
     return 'text-accent';
   }
 </script>
 
-<div class="p-6 w-full animate-fade-in space-y-5">
+<div class="p-6 w-full min-h-full animate-fade-in space-y-5">
 
   <!-- Header -->
   <div>
@@ -500,16 +502,31 @@
         </div>
 
         {#if tpPending.length > 0}
+          {@const totalFiles = tpPending.reduce((s, src) => s + (src.count ?? 0), 0)}
           <div>
-            <div class="text-2xs font-semibold mb-2" style="color:#5a5a78">Arquivos Pendentes ({tpPending.length})</div>
-            <div class="max-h-48 overflow-y-auto rounded-xl border" style="border-color:#1a1a28">
-              {#each tpPending as f}
-                <div class="list-row flex items-center gap-2 px-3 py-2 text-xs">
-                  <span style="color:#5a5a78">•</span>
-                  <span class="text-white truncate flex-1">{typeof f === 'string' ? f : (f.name ?? f.file ?? JSON.stringify(f))}</span>
-                </div>
-              {/each}
+            <div class="text-2xs font-semibold mb-2" style="color:#5a5a78">
+              {totalFiles > 0 ? `Arquivos Pendentes (${totalFiles})` : 'Nenhum arquivo pendente'}
             </div>
+            {#if totalFiles > 0}
+              <div class="max-h-64 overflow-y-auto rounded-xl border" style="border-color:#1a1a28">
+                {#each tpPending.filter(s => (s.count ?? 0) > 0) as src}
+                  <div class="border-b last:border-0" style="border-color:#1a1a28">
+                    <div class="flex items-center gap-2 px-3 py-2">
+                      <span class="text-sm">{src.icon ?? '📁'}</span>
+                      <span class="text-xs font-medium text-white flex-1">{src.name}</span>
+                      <span class="text-2xs px-1.5 py-0.5 rounded font-medium"
+                            style="background:rgba(124,106,245,0.1);color:#9d8eff">{src.count}</span>
+                    </div>
+                    {#each (src.items ?? []) as item}
+                      <div class="list-row flex items-center gap-2 pl-8 pr-3 py-1.5 text-xs">
+                        <span style="color:#5a5a78">•</span>
+                        <span class="text-white truncate flex-1">{item}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>

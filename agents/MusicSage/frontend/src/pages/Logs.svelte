@@ -101,7 +101,7 @@
   }
 </script>
 
-<div class="p-6 w-full animate-fade-in space-y-5">
+<div class="p-6 w-full min-h-full animate-fade-in flex flex-col gap-5">
 
   <!-- Header -->
   <div class="flex items-end justify-between gap-4 flex-wrap">
@@ -188,17 +188,17 @@
       {/if}
     </div>
 
-    <div class="grid grid-cols-1 xl:grid-cols-4 gap-5">
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-5 flex-1 min-h-0">
 
       <!-- Log viewer -->
-      <div class="xl:col-span-3 rounded-2xl border overflow-hidden" style="background:#080810;border-color:#1a1a28">
+      <div class="xl:col-span-3 rounded-2xl border overflow-hidden flex flex-col" style="background:#080810;border-color:#1a1a28">
         <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color:#1a1a28">
           <div class="text-sm font-semibold text-white">Log de Hoje</div>
           <span class="text-2xs" style="color:#5a5a78">
             {filteredLines.length} de {lines.length} linhas
           </span>
         </div>
-        <div class="overflow-y-auto font-mono text-2xs leading-5 p-3" style="max-height:60vh">
+        <div class="overflow-y-auto flex-1 font-mono text-2xs leading-5 p-3">
           {#if filteredLines.length === 0}
             <div class="py-8 text-center" style="color:#5a5a78">
               {lines.length === 0 ? 'Nenhum log hoje.' : 'Nenhuma linha corresponde ao filtro.'}

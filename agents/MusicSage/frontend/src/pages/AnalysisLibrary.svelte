@@ -102,7 +102,7 @@
   const running = $derived(progress?.running === true);
 </script>
 
-<div class="p-6 w-full animate-fade-in space-y-6">
+<div class="p-6 w-full min-h-full animate-fade-in space-y-6">
 
   <!-- Header -->
   <div>

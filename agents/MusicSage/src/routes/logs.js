@@ -11,7 +11,8 @@ import { fileURLToPath } from "url";
 import { logger } from "../logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOG_DIR   = join(__dirname, "../../../mediasage/logs");
+// __dirname = src/routes/ → go up 4 levels to reach plex_server/
+const LOG_DIR   = join(__dirname, "../../../../mediasage/logs");
 
 function listLogFiles() {
   if (!existsSync(LOG_DIR)) return [];
