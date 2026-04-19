@@ -14,7 +14,7 @@
   import Logs            from './pages/Logs.svelte';
 </script>
 
-<div class="flex h-screen overflow-hidden bg-bg text-white">
+<div class="flex h-screen w-full overflow-hidden bg-bg text-white">
   <Sidebar />
 
   <main class="flex-1 overflow-y-auto" id="main-content">
