@@ -1,7 +1,14 @@
 import axios from "axios";
 import fs from "fs/promises";
+import { execFile as _execFile } from "child_process";
+import { promisify } from "util";
+import { tmpdir } from "os";
+import { join as pathJoin } from "path";
+import { randomUUID } from "crypto";
 import { PromptTemplates } from "./src/templates.js";
 import { WebSearch } from "./src/web-search.js";
+
+const execFile = promisify(_execFile);
 
 /**
  * AllFather - Camada de comunicação com Ollama para todos os agents
@@ -105,6 +112,7 @@ export class AllFather {
       model: options.model || this.model,
       prompt: finalPrompt,
       stream: false,
+      think: disableReasoning ? false : undefined,
       options: {
         temperature: options.temperature ?? this.temperature,
         num_predict: options.maxTokens ?? this.defaultMaxTokens,
@@ -117,11 +125,16 @@ export class AllFather {
       try {
         const response = await this.axiosInstance.post("/api/generate", params);
 
-        if (response.data && response.data.response) {
+        if (response.data && response.data.response != null) {
+          if (response.data.response === '') {
+            const reason = response.data.done_reason ?? 'unknown';
+            throw new Error(`Resposta vazia do Ollama (done_reason=${reason})`);
+          }
           return response.data.response.trim();
         }
 
-        throw new Error("Resposta inválida do Ollama");
+        const detail = response.data?.error ?? JSON.stringify(response.data).slice(0, 300);
+        throw new Error(`Resposta inválida do Ollama: ${detail}`);
       } catch (error) {
         lastError = error;
 
@@ -205,6 +218,16 @@ export class AllFather {
       temperature: options.temperature ?? 0.3, // Temperatura mais baixa para JSON
     });
 
+    return this._parseJSONResponse(response);
+  }
+
+  /**
+   * Extrai e parseia JSON de uma resposta de LLM.
+   * Lida com thinking tokens, markdown code fences, comentários e truncamentos.
+   * @param {string} response — texto bruto retornado pelo modelo
+   * @returns {*} JSON parseado
+   */
+  _parseJSONResponse(response) {
     try {
       // Remove thinking tokens (<think>...</think>) de modelos como qwen3, deepseek-r1
       let cleaned = response.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
@@ -263,6 +286,137 @@ export class AllFather {
     } catch (error) {
       throw new Error(`Falha ao parsear JSON da resposta: ${response}`);
     }
+  }
+
+  // ─── Audio (gemma4 via Ollama) ─────────────────────────────────────────────
+
+  /**
+   * Envia um arquivo de áudio para o Ollama junto com um prompt de texto.
+   *
+   * O Ollama detecta áudio pelos magic bytes RIFF/WAVE no campo `images`.
+   * O áudio é convertido para WAV mono 16 kHz via ffmpeg antes do envio.
+   *
+   * Mitigações de bugs conhecidos do llama.cpp:
+   *   #15333 — crash intermitente → retry cortando 0.5 s por tentativa
+   *   #11798 — campo audio inexistente → áudio passa pelo campo images
+   *
+   * @param {string} prompt     — texto do prompt
+   * @param {string} audioPath  — caminho local do arquivo de áudio
+   * @param {object} options
+   * @param {number} [options.maxAudioSecs=30]  — duração máxima do áudio enviado
+   * @param {number} [options.retries]          — tentativas (padrão: this.maxRetries)
+   * @param {number} [options.temperature]
+   * @param {number} [options.maxTokens]
+   * @param {string} [options.model]
+   * @returns {Promise<string>}
+   */
+  async askWithAudio(prompt, audioPath, options = {}) {
+    const maxAudioSecs = options.maxAudioSecs ?? 30;
+    const maxAttempts  = options.retries ?? this.maxRetries;
+
+    // Obtém duração real do arquivo, clamped pelo limite configurado
+    const duration = await this._getAudioDuration(audioPath);
+    let trimSecs   = Math.min(duration, maxAudioSecs);
+
+    let lastError;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let wavPath = null;
+      try {
+        wavPath = await this._audioToWav(audioPath, trimSecs);
+        const audioBase64 = (await fs.readFile(wavPath)).toString("base64");
+        return await this._chatWithImages(prompt, [audioBase64], options);
+      } catch (err) {
+        lastError = err;
+        // Mitiga bug #15333: reduz 0.5 s por tentativa para mudar o token count
+        trimSecs = Math.max(trimSecs - 0.5, 1);
+      } finally {
+        if (wavPath) fs.unlink(wavPath).catch(() => {});
+      }
+    }
+
+    throw new Error(`askWithAudio falhou após ${maxAttempts} tentativas: ${lastError.message}`);
+  }
+
+  /**
+   * Igual ao askWithAudio mas forçando resposta em JSON.
+   * @param {string} question
+   * @param {string} audioPath
+   * @param {object} options
+   * @returns {Promise<*>}
+   */
+  async askForJSONWithAudio(question, audioPath, options = {}) {
+    const jsonPrompt = `${question}\n\nIMPORTANTE: Responda APENAS com JSON válido, sem texto adicional antes ou depois.`;
+    const response   = await this.askWithAudio(jsonPrompt, audioPath, {
+      ...options,
+      temperature: options.temperature ?? 0.3,
+    });
+    return this._parseJSONResponse(response);
+  }
+
+  /**
+   * Envia um prompt + lista de imagens/audio (base64) via /api/chat.
+   * Força num_ctx=8192 para requests com audio (evita conflito com KV cache).
+   * @private
+   */
+  async _chatWithImages(prompt, imagesBase64, options = {}) {
+    const params = {
+      model: options.model || this.model,
+      messages: [{
+        role:    "user",
+        content: prompt,
+        images:  imagesBase64,
+      }],
+      stream: false,
+      options: {
+        temperature: options.temperature ?? this.temperature,
+        num_predict: options.maxTokens   ?? this.defaultMaxTokens,
+        num_ctx:     8192, // obrigatório para audio — evita competição com KV cache
+      },
+    };
+
+    const response = await this.axiosInstance.post("/api/chat", params, {
+      timeout: options.timeout ?? 120000,
+    });
+
+    const content = response.data?.message?.content;
+    if (!content) throw new Error("Resposta vazia do Ollama (audio/image)");
+    return content.trim();
+  }
+
+  /**
+   * Obtém a duração de um arquivo de áudio via ffprobe.
+   * Retorna 30 s como fallback em caso de falha.
+   * @private
+   */
+  async _getAudioDuration(audioPath) {
+    try {
+      const { stdout } = await execFile("ffprobe", [
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        audioPath,
+      ], { timeout: 10000 });
+      return parseFloat(stdout.trim()) || 30;
+    } catch {
+      return 30;
+    }
+  }
+
+  /**
+   * Converte um arquivo de áudio para WAV mono 16 kHz usando ffmpeg.
+   * O header RIFF/WAVE é essencial para o Ollama detectar o tipo como áudio.
+   * @param {string} inputPath  — arquivo de entrada (qualquer formato)
+   * @param {number} maxSecs    — duração máxima (0 = sem limite)
+   * @returns {Promise<string>}  caminho do arquivo WAV temporário criado
+   * @private
+   */
+  async _audioToWav(inputPath, maxSecs = 0) {
+    const outPath = pathJoin(tmpdir(), `allfather-${randomUUID()}.wav`);
+    const args    = ["-y", "-i", inputPath, "-ar", "16000", "-ac", "1", "-f", "wav"];
+    if (maxSecs > 0) args.push("-t", String(maxSecs));
+    args.push(outPath);
+    await execFile("ffmpeg", args, { timeout: 120000 });
+    return outPath;
   }
 
   /**

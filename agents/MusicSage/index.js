@@ -19,6 +19,7 @@ import { LibraryScanner } from "./src/services/LibraryScanner.js";
 import { HistoryService } from "./src/services/HistoryService.js";
 import { MetricsService } from "./src/services/MetricsService.js";
 import { MusicAnalyzer } from "./src/services/MusicAnalyzer.js";
+import { AnalysisCacheService } from "./src/services/AnalysisCacheService.js";
 import { RecommendationEngine } from "./src/services/RecommendationEngine.js";
 import { PlaylistBuilder } from "./src/services/PlaylistBuilder.js";
 import { LastFmService } from "./src/services/LastFmService.js";
@@ -28,7 +29,7 @@ const PORT = parseInt(process.env.MUSICSAGE_PORT || "3001", 10);
 const PLEX_URL = process.env.PLEX_URL || "http://localhost:32400";
 const PLEX_TOKEN = process.env.PLEX_TOKEN || "";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "deepseek-r1:14b-qwen-distill-q4_K_M";
+const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "gemma4:e4b";
 
 // ── Instancia serviços ────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ const historyService = new HistoryService({ axios, plexUrl: PLEX_URL, plexToken:
 const metricsService = new MetricsService({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN });
 const analyzer = new MusicAnalyzer({ allfather });
 const lastFmService = new LastFmService({ axios, apiKey: process.env.LASTFM_API_KEY });
+const analysisCache   = new AnalysisCacheService();
 
 const recommendationEngine = new RecommendationEngine({
   allfather,
@@ -51,6 +53,7 @@ const recommendationEngine = new RecommendationEngine({
   historyService,
   analyzer,
   lastFmService,
+  analysisCache,
 });
 
 const plexService     = new PlexService({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN });
@@ -69,6 +72,9 @@ const embeddingService  = new EmbeddingService({
 
 const playlistBuilder = new PlaylistBuilder({ allfather, libraryScanner, embeddingService });
 
+// Carrega cache de análises salvas anteriormente
+analysisCache.load().catch(err => logger.warn("ANALYSIS_CACHE", `Falha ao carregar: ${err.message}`));
+
 // ── Inicializa e faz scan inicial da biblioteca ───────────────────────────
 
 logger.info("SERVER", "🎵 MusicSage — iniciando...");
@@ -85,7 +91,7 @@ libraryScanner.scan().then((result) => {
 
 // ── Sobe o servidor ───────────────────────────────────────────────────────
 
-const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService });
+const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache });
 
 const server = app.listen(PORT);
 

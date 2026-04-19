@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MusicSage</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -295,6 +296,33 @@
     .range-row { display: flex; justify-content: space-between; font-size: .7rem; color: var(--text-muted); margin-top: 4px; }
     .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    /* ── Autocomplete dropdown ── */
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+      max-height: 220px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,.35);
+    }
+    .autocomplete-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: .82rem;
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
+    .autocomplete-item:last-child { border-bottom: none; }
+    .autocomplete-item:hover, .autocomplete-item.focused { background: var(--surface3); }
+    .autocomplete-item .ac-title { font-weight: 600; }
+    .autocomplete-item .ac-meta  { font-size: .73rem; color: var(--text-muted); margin-top: 1px; }
 
     /* ── Tabs ── */
     .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 22px; }
@@ -897,6 +925,12 @@
       </a>
     </div>
     <div class="nav-group">
+      <div class="nav-group-label">Análise</div>
+      <a href="#" class="nav-link" data-page="analysis-library">
+        <span class="nav-icon">🔬</span> Análise da Biblioteca
+      </a>
+    </div>
+    <div class="nav-group">
       <div class="nav-group-label">Downloads</div>
       <a href="#" class="nav-link" data-page="downloads">
         <span class="nav-icon">⬇</span> Downloads
@@ -1044,12 +1078,19 @@
           </div>
         </div>
         <div class="section-box-body">
-          <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px">
-            <div class="form-group" style="flex:1;max-width:340px">
+          <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px">
+            <div class="form-group" style="flex:1;max-width:340px;margin-bottom:0">
               <label>Artista de referência</label>
               <input type="text" id="rec-similar-input" class="form-control" placeholder="ex: Radiohead" />
             </div>
             <button class="btn btn-primary btn-sm" id="btn-similar-search" style="flex-shrink:0;align-self:flex-end">🔍 Buscar</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <span style="font-size:.75rem;color:var(--text-muted)">Buscar:</span>
+            <div class="cl-view-toggle" style="display:inline-flex">
+              <button class="cl-view-btn active" id="btn-similar-mode-out">Fora da biblioteca</button>
+              <button class="cl-view-btn" id="btn-similar-mode-in">Na minha biblioteca</button>
+            </div>
           </div>
           <div id="similar-alert"></div>
           <div id="similar-grid" class="rec-grid"></div>
@@ -1112,66 +1153,111 @@
   <section id="page-new-playlist" class="page">
     <div class="page-header">
       <h1>Nova Playlist</h1>
-      <p class="subtitle">Gere uma playlist por critérios ou descreva com suas palavras.</p>
+      <p class="subtitle">Gere uma playlist por prompt ou usando uma música analisada como base.</p>
     </div>
-    <div class="page-content" style="max-width:660px">
-      <div class="tabs">
-        <button class="tab active" data-tab="criteria">Por Critérios</button>
-        <button class="tab" data-tab="prompt">Por Prompt</button>
+    <div class="page-content" style="max-width:700px">
+      <div class="tabs" id="np-tabs">
+        <button class="tab active" data-tab="cache-prompt">✨ Por Prompt</button>
+        <button class="tab" data-tab="cache-music">🎵 Por Música</button>
       </div>
 
-      <div class="tab-panel active" id="tab-criteria">
-        <div class="form-row-2" style="margin-bottom:12px">
-          <div class="form-group">
-            <label>Nome da Playlist</label>
-            <input type="text" id="gen-name" class="form-control" placeholder="Auto-gerado se vazio" />
-          </div>
-          <div class="form-group">
-            <label>Gênero</label>
-            <input type="text" id="gen-genre" class="form-control" placeholder="ex: jazz, metal, eletrônico…" />
-          </div>
+      <!-- ── Tab: Por Prompt (baseado no cache de análises) ── -->
+      <div class="tab-panel active" id="tab-cache-prompt">
+        <div id="cp-cache-info" style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:16px;font-size:.8rem;color:var(--text-muted);border-left:3px solid var(--border)">
+          <span id="cp-cache-icon">📊</span>
+          <span id="cp-cache-text">Carregando cache de análises…</span>
         </div>
-        <div class="form-row-3" style="margin-bottom:12px">
-          <div class="form-group">
-            <label>Mood</label>
-            <select id="gen-mood" class="form-control">
-              <option value="">— qualquer —</option>
-              <option>relaxed</option>
-              <option>energetic</option>
-              <option>melancholic</option>
-              <option>happy</option>
-              <option>dark</option>
-              <option>upbeat</option>
-              <option>focused</option>
-              <option>romantic</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Tamanho</label>
-            <input type="number" id="gen-size" class="form-control" min="3" max="50" value="10" />
-          </div>
-          <div class="form-group">
-            <label>Energia: <strong id="energy-val">5</strong></label>
-            <input type="range" id="gen-energy" min="1" max="10" value="5"
-              oninput="document.getElementById('energy-val').textContent=this.value"
-              style="margin-top:10px" />
-            <div class="range-row"><span>calmo</span><span>intenso</span></div>
-          </div>
-        </div>
-        <div id="gen-alert"></div>
-        <button class="btn btn-primary" id="btn-generate">🎵 Gerar Playlist</button>
-      </div>
-
-      <div class="tab-panel" id="tab-prompt">
         <div class="form-group" style="margin-bottom:12px">
           <label>Descreva a playlist</label>
-          <textarea id="prompt-text" class="form-control" rows="5"
+          <textarea id="cp-prompt-text" class="form-control" rows="5"
             placeholder="Exemplos:&#10;• Uma playlist relaxante com jazz dos anos 60 para trabalhar&#10;• 15 músicas energéticas de rock para treinar&#10;• Algo melancólico e introspectivo, pianos e baixo tempo"
           ></textarea>
         </div>
-        <div id="prompt-alert"></div>
-        <button class="btn btn-primary" id="btn-from-prompt">✨ Gerar por Prompt</button>
+        <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+          <div style="min-width:120px">
+            <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Máx. por artista</label>
+            <input id="cp-max-per-artist" type="number" value="3" min="1" max="10" class="input-field" style="width:100%">
+          </div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:.82rem;cursor:pointer;padding-bottom:6px">
+            <input id="cp-discovery" type="checkbox"> Incluir músicas pouco ouvidas (~30%)
+          </label>
+        </div>
+        <div id="cp-prompt-alert"></div>
+        <button class="btn btn-primary" id="btn-cp-generate">✨ Gerar Playlist</button>
       </div>
+
+      <!-- ── Tab: Por Música ── -->
+      <div class="tab-panel" id="tab-cache-music">
+
+        <!-- Busca de música no cache -->
+        <div class="section-box" style="margin-bottom:16px;overflow:visible">
+          <div class="sb-title">Música de referência</div>
+          <p class="sb-subtitle" style="margin-bottom:10px">Escolha uma faixa já analisada. O LLM monta uma playlist "Radio" com as músicas do cache que soam mais similares.</p>
+          <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:10px">
+            <span id="cm-cache-count">—</span> faixas disponíveis no cache
+          </div>
+
+          <!-- Autocomplete -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div style="position:relative">
+              <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Título da música</label>
+              <input id="cm-search-title" type="text" placeholder="Digite para buscar…" class="input-field" style="width:100%" autocomplete="off">
+              <div id="cm-autocomplete-title" class="autocomplete-dropdown" style="display:none"></div>
+            </div>
+            <div style="position:relative">
+              <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Artista</label>
+              <input id="cm-search-artist" type="text" placeholder="Filtrar por artista…" class="input-field" style="width:100%" autocomplete="off">
+              <div id="cm-autocomplete-artist" class="autocomplete-dropdown" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Faixa selecionada -->
+          <div id="cm-selected-track" style="display:none;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px">
+            <div style="font-size:.7rem;color:var(--accent);margin-bottom:4px">✓ Faixa selecionada</div>
+            <div style="font-weight:600;font-size:.88rem" id="cm-sel-title">—</div>
+            <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:10px" id="cm-sel-meta"></div>
+            <div id="cm-analysis-chips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+          </div>
+        </div>
+
+        <!-- Opções da playlist -->
+        <div class="section-box">
+          <div class="sb-title">Opções da playlist</div>
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <div style="flex:2;min-width:160px">
+              <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Nome da playlist</label>
+              <input id="cm-pl-name" type="text" placeholder="Radio [Nome da Música]" class="input-field" style="width:100%">
+            </div>
+            <div style="min-width:80px">
+              <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Nº de faixas</label>
+              <input id="cm-pl-size" type="number" value="15" min="5" max="50" class="input-field" style="width:100%">
+            </div>
+            <div style="min-width:100px">
+              <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Máx. por artista</label>
+              <input id="cm-max-per-artist" type="number" value="3" min="1" max="10" class="input-field" style="width:100%">
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:7px;font-size:.82rem;cursor:pointer;margin-bottom:14px">
+            <input id="cm-discovery" type="checkbox"> Incluir músicas pouco ouvidas (~30%)
+          </label>
+
+          <button id="btn-cm-generate" class="btn btn-primary" disabled>🎵 Gerar Radio</button>
+          <div id="cm-pl-alert" style="margin-top:10px"></div>
+
+          <!-- Resultado -->
+          <div id="cm-pl-result" style="display:none;margin-top:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+              <div>
+                <div style="font-weight:700;font-size:1rem" id="cm-pl-title">—</div>
+                <div style="font-size:.78rem;color:var(--text-muted)" id="cm-pl-meta"></div>
+              </div>
+              <button id="btn-cm-pl-goto" class="btn btn-secondary" style="font-size:.78rem">Ver em Playlists →</button>
+            </div>
+            <div id="cm-pl-tracks"></div>
+          </div>
+        </div>
+
+      </div><!-- /tab-cache-music -->
     </div>
   </section>
 
@@ -1399,56 +1485,14 @@
   <section id="page-clusters" class="page">
     <div class="page-header">
       <h1>🔮 Clusters de Similaridade</h1>
-      <p class="subtitle">Visualize e explore sua biblioteca por semelhança semântica e mood.</p>
+      <p class="subtitle">Explore sua biblioteca agrupada por similaridade de áudio: energia, valência, dançabilidade e mais.</p>
     </div>
     <div class="page-content">
-
-      <!-- Embedding batch control -->
-      <div class="section-box">
-        <div class="sb-title">Gerar Embeddings</div>
-        <p class="sb-subtitle" style="margin-bottom:12px">Analisa cada faixa via Ollama para criar vetores semânticos de mood, sonoridade e estilo.</p>
-
-        <div id="cl-batch-area">
-          <div id="cl-status-panel" style="display:none;margin-bottom:12px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-              <span id="cl-status-label" style="font-size:.82rem;color:var(--text-muted)">Aguardando…</span>
-              <span id="cl-status-count" style="font-size:.82rem;font-weight:600;color:var(--accent)">0 / 0</span>
-            </div>
-            <div class="cl-progress-wrap">
-              <div id="cl-progress-fill" class="cl-progress-fill" style="width:0%"></div>
-            </div>
-            <div id="cl-current-track" style="margin-top:5px;font-size:.75rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
-          </div>
-
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <button id="btn-cl-start" class="btn btn-primary">▶ Iniciar</button>
-            <button id="btn-cl-resume" class="btn btn-primary" style="display:none">▶ Retomar</button>
-            <button id="btn-cl-stop" class="btn btn-secondary" style="display:none">⏹ Parar</button>
-            <button id="btn-cl-reembed" class="btn btn-secondary" style="display:none">🔄 Re-processar tudo</button>
-            <div id="cl-batch-alert"></div>
-          </div>
-
-          <div id="cl-embed-stats" style="display:none;margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
-            <div style="display:flex;gap:20px;flex-wrap:wrap">
-              <div><span style="color:var(--text-muted);font-size:.75rem">Processadas</span><div id="cls-done" style="font-weight:700;font-size:1.1rem;color:var(--success)">0</div></div>
-              <div><span style="color:var(--text-muted);font-size:.75rem">Puladas</span><div id="cls-skipped" style="font-weight:700;font-size:1.1rem">0</div></div>
-              <div><span style="color:var(--text-muted);font-size:.75rem">Erros</span><div id="cls-errors" style="font-weight:700;font-size:1.1rem;color:var(--danger)">0</div></div>
-              <div><span style="color:var(--text-muted);font-size:.75rem">Modelo</span><div id="cls-model" style="font-weight:600;font-size:.82rem;margin-top:2px">—</div></div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- Cluster computation -->
       <div class="section-box">
         <div class="sb-title">Visualizar Clusters</div>
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <label style="font-size:.82rem;color:var(--text-muted)">Clusters (k):</label>
-            <input id="cl-k-input" type="range" min="2" max="20" value="8" style="width:120px;accent-color:var(--accent)">
-            <span id="cl-k-value" style="font-size:.9rem;font-weight:700;min-width:18px;text-align:center">8</span>
-            <button id="btn-cl-k-auto" class="cl-view-btn" title="Detectar k ideal automaticamente (Método Elbow)">Auto</button>
-          </div>
           <button id="btn-cl-compute" class="btn btn-primary">⚡ Calcular Clusters</button>
           <button id="btn-cl-reset-view" class="btn btn-secondary" style="display:none">↺ Reset View</button>
           <div id="cl-view-toggle-wrap" class="cl-view-toggle" style="display:none">
@@ -1503,6 +1547,82 @@
     </div>
   </section>
 
+  <!-- ────────── ANALYSIS LIBRARY ────────── -->
+  <section id="page-analysis-library" class="page">
+    <div class="page-header">
+      <h1>🔬 Análise da Biblioteca</h1>
+      <p class="subtitle">Analisa todas as faixas da biblioteca usando o gemma4, salvando um perfil sonoro completo de cada uma. Ao gerar playlists por áudio, os dados pré-analisados são usados automaticamente.</p>
+    </div>
+    <div class="page-content" style="max-width:700px">
+
+      <!-- Status do cache -->
+      <div class="section-box" style="margin-bottom:18px">
+        <div class="sb-title">Status do cache</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px" id="al-stats-grid">
+          <div style="background:var(--surface2);padding:10px 14px;border-radius:var(--radius-sm)">
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:3px">Faixas analisadas</div>
+            <div style="font-size:1.4rem;font-weight:700" id="al-stat-cached">—</div>
+          </div>
+          <div style="background:var(--surface2);padding:10px 14px;border-radius:var(--radius-sm)">
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:3px">Total na biblioteca</div>
+            <div style="font-size:1.4rem;font-weight:700" id="al-stat-total">—</div>
+          </div>
+          <div style="background:var(--surface2);padding:10px 14px;border-radius:var(--radius-sm)">
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:3px">Cobertura</div>
+            <div style="font-size:1.4rem;font-weight:700" id="al-stat-pct">—</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="btn-al-refresh-stats" style="margin-right:8px">🔄 Atualizar</button>
+        <button class="btn btn-danger" id="btn-al-clear-cache">🗑 Limpar cache</button>
+        <div id="al-stats-alert" style="margin-top:8px"></div>
+      </div>
+
+      <!-- Iniciar análise em lote -->
+      <div class="section-box" style="margin-bottom:18px">
+        <div class="sb-title">Análise em lote</div>
+        <p class="sb-subtitle" style="margin-bottom:14px">Analisa faixas que ainda não foram analisadas. Pode levar muito tempo — cada faixa leva ~30–60 s.</p>
+
+        <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div>
+            <label style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">Segundos de áudio / faixa</label>
+            <select id="al-max-secs" class="input-field">
+              <option value="15">15 s</option>
+              <option value="30" selected>30 s</option>
+              <option value="60">60 s</option>
+            </select>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;padding-bottom:4px;cursor:pointer">
+            <input type="checkbox" id="al-skip-existing" checked> Pular já analisadas
+          </label>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div id="al-progress-wrap" style="display:none;margin-bottom:14px">
+          <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">
+            Progresso: <strong id="al-progress-text">0 / 0</strong> (<span id="al-progress-pct">0%</span>)
+            — <span id="al-progress-failed" style="color:var(--danger)">0 falhas</span>
+          </div>
+          <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+            <div id="al-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width .4s"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="btn-al-start">▶ Iniciar análise</button>
+          <button class="btn btn-danger" id="btn-al-abort" style="display:none">⏹ Cancelar</button>
+        </div>
+        <div id="al-batch-alert" style="margin-top:10px"></div>
+      </div>
+
+      <!-- Amostra do cache -->
+      <div class="section-box">
+        <div class="sb-title">Faixas analisadas recentemente</div>
+        <div id="al-cache-list" style="max-height:400px;overflow-y:auto"></div>
+      </div>
+
+    </div>
+  </section>
+
 </main>
 
 <!-- Cluster tooltip -->
@@ -1511,6 +1631,7 @@
 <div id="toast"></div>
 
 <script>
+
 /* ═══════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════ */
@@ -1574,6 +1695,8 @@ document.querySelectorAll('.nav-link').forEach(a => {
     if (page === 'playlists') loadPlaylists();
     if (page === 'downloads') initDownloadsPage();
     if (page === 'dashboard') loadDashboard();
+    if (page === 'new-playlist') npLoadCacheInfo();
+    if (page === 'analysis-library') alLoadStats();
   });
 });
 
@@ -1688,7 +1811,7 @@ async function loadRecommendations() {
 }
 document.getElementById('btn-refresh-rec').addEventListener('click', loadRecommendations);
 
-function renderSimilarGrid(recs) {
+function renderSimilarGrid(recs, inLibraryMode = false) {
   const grid = document.getElementById('similar-grid');
   if (!recs.length) {
     grid.innerHTML = '<div class="empty-state" style="padding:20px 0"><div class="icon">🎵</div><p>Nenhum artista semelhante encontrado.</p></div>';
@@ -1697,32 +1820,40 @@ function renderSimilarGrid(recs) {
   grid.innerHTML = recs.map(r => `
     <div class="rec-card">
       <span class="badge badge-accent">${escHtml(r.genre || 'Desconhecido')}</span>
+      ${(inLibraryMode || r.inLibrary) ? `<span class="badge" style="background:var(--success);color:#fff;margin-left:4px">✓ Na biblioteca</span>` : ''}
       <div class="artist-name">${escHtml(r.artist || '')}</div>
       ${r.similarity != null ? `<div style="font-size:.7rem;color:var(--text-muted)">${(r.similarity*100).toFixed(0)}%${r.source?' · '+r.source:''}</div>` : ''}
       ${r.whyRecommended ? `<div class="why">${escHtml(r.whyRecommended)}</div>` : ''}
+      ${!(inLibraryMode || r.inLibrary) ? `
       <div class="rec-actions">
         <button class="btn btn-xs btn-tidal" data-dl-tidal="${escHtml(r.artist||'')}">🌊 Tidal</button>
         <button class="btn btn-xs btn-torrent" data-dl-torrent="${escHtml(r.artist||'')}">⚡ Torrent</button>
-      </div>
+      </div>` : ''}
     </div>`).join('');
-  grid.querySelectorAll('[data-dl-tidal]').forEach(btn =>
-    btn.addEventListener('click', e => { e.stopPropagation(); navigateToDownload('tidecaller', btn.dataset.dlTidal); }));
-  grid.querySelectorAll('[data-dl-torrent]').forEach(btn =>
-    btn.addEventListener('click', e => { e.stopPropagation(); navigateToDownload('stormbringer', btn.dataset.dlTorrent); }));
+  if (!inLibraryMode) {
+    grid.querySelectorAll('[data-dl-tidal]').forEach(btn =>
+      btn.addEventListener('click', e => { e.stopPropagation(); navigateToDownload('tidecaller', btn.dataset.dlTidal); }));
+    grid.querySelectorAll('[data-dl-torrent]').forEach(btn =>
+      btn.addEventListener('click', e => { e.stopPropagation(); navigateToDownload('stormbringer', btn.dataset.dlTorrent); }));
+  }
 }
 
 async function loadSimilarArtists() {
   const artist = document.getElementById('rec-similar-input').value.trim();
   if (!artist) { setAlert('similar-alert', 'Informe o nome de um artista.', 'info'); return; }
   const btn = document.getElementById('btn-similar-search');
+  const inLibraryMode = document.getElementById('btn-similar-mode-in').classList.contains('active');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Buscando…';
   setAlert('similar-alert', '');
   document.getElementById('similar-grid').innerHTML = '';
   try {
-    const data = await api('GET', `/recommendations/similar?artist=${encodeURIComponent(artist)}&limit=12`);
-    renderSimilarGrid(data);
-    if (data.length) toast(`${data.length} artistas semelhantes a "${artist}"`);
+    const endpoint = inLibraryMode
+      ? `/recommendations/similar-in-library?artist=${encodeURIComponent(artist)}&limit=12`
+      : `/recommendations/similar?artist=${encodeURIComponent(artist)}&limit=12`;
+    const data = await api('GET', endpoint);
+    renderSimilarGrid(data, inLibraryMode);
+    if (data.length) toast(`${data.length} artistas semelhantes a "${artist}"${inLibraryMode ? ' (na sua biblioteca)' : ''}`);
   } catch (err) {
     setAlert('similar-alert', 'Erro: ' + err.message, 'error');
   } finally {
@@ -1732,6 +1863,16 @@ async function loadSimilarArtists() {
 }
 document.getElementById('btn-similar-search').addEventListener('click', loadSimilarArtists);
 document.getElementById('rec-similar-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadSimilarArtists(); });
+
+/* ── Similar mode toggle (Fora da biblioteca / Na minha biblioteca) ── */
+document.getElementById('btn-similar-mode-out').addEventListener('click', () => {
+  document.getElementById('btn-similar-mode-out').classList.add('active');
+  document.getElementById('btn-similar-mode-in').classList.remove('active');
+});
+document.getElementById('btn-similar-mode-in').addEventListener('click', () => {
+  document.getElementById('btn-similar-mode-in').classList.add('active');
+  document.getElementById('btn-similar-mode-out').classList.remove('active');
+});
 
 /* ═══════════════════════════════════════════
    PLAYLISTS — Two-panel
@@ -1923,50 +2064,6 @@ async function pushToPlex(plId) {
 /* ═══════════════════════════════════════════
    GENERATE PLAYLIST
 ═══════════════════════════════════════════ */
-document.getElementById('btn-generate').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-generate');
-  const name   = document.getElementById('gen-name').value.trim() || undefined;
-  const mood   = document.getElementById('gen-mood').value || undefined;
-  const genre  = document.getElementById('gen-genre').value.trim() || undefined;
-  const energy = parseInt(document.getElementById('gen-energy').value);
-  const size   = parseInt(document.getElementById('gen-size').value) || 10;
-  setAlert('gen-alert', '');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Gerando…';
-  try {
-    const pl = await api('POST', '/playlists/generate', { name, mood, genre, energy, size });
-    toast(`"${pl.name}" criada com ${pl.tracks.length} faixas! ✅`);
-    document.querySelector('[data-page="playlists"]').click();
-    setTimeout(() => selectPlaylist(pl.id), 200);
-  } catch (err) {
-    setAlert('gen-alert', 'Erro: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '🎵 Gerar Playlist';
-  }
-});
-
-document.getElementById('btn-from-prompt').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-from-prompt');
-  const prompt = document.getElementById('prompt-text').value.trim();
-  if (!prompt) { setAlert('prompt-alert', 'Digite uma descrição.', 'error'); return; }
-  setAlert('prompt-alert', '');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Interpretando…';
-  try {
-    const pl = await api('POST', '/playlists/from-prompt', { prompt });
-    toast(`"${pl.name}" criada com ${pl.tracks.length} faixas! ✅`);
-    document.getElementById('prompt-text').value = '';
-    document.querySelector('[data-page="playlists"]').click();
-    setTimeout(() => selectPlaylist(pl.id), 200);
-  } catch (err) {
-    setAlert('prompt-alert', 'Erro: ' + err.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '✨ Gerar por Prompt';
-  }
-});
-
 /* ═══════════════════════════════════════════
    DOWNLOADS
 ═══════════════════════════════════════════ */
@@ -2494,7 +2591,6 @@ function _startMonitorOnDownload() {
 const CL = {
   clusters: null,       // latest cluster data from API
   selectedId: null,     // currently selected cluster id
-  pollTimer: null,      // interval for batch status polling
   svgScale: 1,
   svgPanX: 0,
   svgPanY: 0,
@@ -2512,153 +2608,19 @@ const CL = {
   orbit: null,
 };
 
-/* ── k slider + Auto toggle ── */
-document.getElementById('cl-k-input').addEventListener('input', () => {
-  document.getElementById('cl-k-value').textContent = document.getElementById('cl-k-input').value;
-  // Deactivate Auto when slider moves
-  document.getElementById('btn-cl-k-auto').classList.remove('active');
-  document.getElementById('cl-k-input').disabled = false;
-});
-document.getElementById('btn-cl-k-auto').addEventListener('click', () => {
-  const btn = document.getElementById('btn-cl-k-auto');
-  const active = btn.classList.toggle('active');
-  const input  = document.getElementById('cl-k-input');
-  input.disabled = active;
-  document.getElementById('cl-k-value').textContent = active ? '?' : input.value;
-  input.style.opacity = active ? '0.35' : '';
-});
-
-/* ── navigation hook – load status when page opens ── */
-const _origNavHelper = (page) => {
-  if (page === 'clusters') clLoadStatus();
-};
-document.querySelectorAll('.nav-link').forEach(a => {
-  a.addEventListener('click', () => _origNavHelper(a.dataset.page));
-});
-
-/* ────── Batch status ────── */
-async function clLoadStatus() {
-  try {
-    const s = await api('GET', '/embeddings/status');
-    clApplyStatus(s);
-  } catch (err) {
-    // server may not have embeddings route yet
-    setAlert('cl-batch-alert', 'Erro ao obter status: ' + err.message, 'error');
-  }
-}
-
-function clApplyStatus(s) {
-  const startBtn   = document.getElementById('btn-cl-start');
-  const resumeBtn  = document.getElementById('btn-cl-resume');
-  const stopBtn    = document.getElementById('btn-cl-stop');
-  const reembedBtn = document.getElementById('btn-cl-reembed');
-  const statusPanel = document.getElementById('cl-status-panel');
-  const statsArea   = document.getElementById('cl-embed-stats');
-
-  const stored = s.stored || 0;
-  const total  = s.total  || 0;
-  const done   = s.done   || 0;
-  const pct    = total > 0 ? Math.round(done / total * 100) : 0;
-
-  // Progress bar & labels
-  if (s.running || stored > 0) {
-    statusPanel.style.display = '';
-    document.getElementById('cl-status-label').textContent =
-      s.running ? 'Processando…' : (stored > 0 ? `${stored} faixas com embedding` : 'Aguardando…');
-    document.getElementById('cl-status-count').textContent = s.running ? `${done} / ${total}` : `${stored} armazenadas`;
-    document.getElementById('cl-progress-fill').style.width = s.running ? pct + '%' : '100%';
-    document.getElementById('cl-progress-fill').style.background = s.running ? '' : 'var(--success)';
-    const ct = s.currentTrack;
-    document.getElementById('cl-current-track').textContent =
-      ct ? `"${ct.title}" — ${ct.artist}` : '';
-  } else {
-    statusPanel.style.display = 'none';
-  }
-
-  // Stats block
-  if (stored > 0 || done > 0) {
-    statsArea.style.display = '';
-    document.getElementById('cls-done').textContent    = stored || done;
-    document.getElementById('cls-skipped').textContent = s.skipped || 0;
-    document.getElementById('cls-errors').textContent  = s.errors  || 0;
-    document.getElementById('cls-model').textContent   = s.model   || '—';
-  } else {
-    statsArea.style.display = 'none';
-  }
-
-  // Buttons
-  startBtn.style.display   = (!s.running && stored === 0) ? '' : 'none';
-  resumeBtn.style.display  = (!s.running && stored > 0)   ? '' : 'none';
-  stopBtn.style.display    = s.running ? '' : 'none';
-  reembedBtn.style.display = (!s.running && stored > 0)   ? '' : 'none';
-}
-
-function clStartPolling() {
-  clearInterval(CL.pollTimer);
-  CL.pollTimer = setInterval(async () => {
-    try {
-      const s = await api('GET', '/embeddings/status');
-      clApplyStatus(s);
-      if (!s.running) clearInterval(CL.pollTimer);
-    } catch { clearInterval(CL.pollTimer); }
-  }, 2000);
-}
-
-document.getElementById('btn-cl-start').addEventListener('click', async () => {
-  setAlert('cl-batch-alert', '');
-  try {
-    await api('POST', '/embeddings/start', { force: false });
-    toast('▶ Batch de embeddings iniciado!');
-    clStartPolling();
-    setTimeout(clLoadStatus, 500);
-  } catch (err) { setAlert('cl-batch-alert', err.message, 'error'); }
-});
-
-document.getElementById('btn-cl-resume').addEventListener('click', async () => {
-  setAlert('cl-batch-alert', '');
-  try {
-    await api('POST', '/embeddings/start', { force: false });
-    toast('▶ Retomando embeddings…');
-    clStartPolling();
-    setTimeout(clLoadStatus, 500);
-  } catch (err) { setAlert('cl-batch-alert', err.message, 'error'); }
-});
-
-document.getElementById('btn-cl-stop').addEventListener('click', async () => {
-  try {
-    await api('POST', '/embeddings/stop');
-    clearInterval(CL.pollTimer);
-    toast('⏹ Parando batch…');
-    setTimeout(clLoadStatus, 800);
-  } catch (err) { toast('Erro: ' + err.message, 'err'); }
-});
-
-document.getElementById('btn-cl-reembed').addEventListener('click', async () => {
-  if (!confirm('Re-processar TODAS as faixas? Os embeddings existentes serão apagados.')) return;
-  setAlert('cl-batch-alert', '');
-  try {
-    await api('DELETE', '/embeddings/reset');
-    await api('POST', '/embeddings/start', { force: true });
-    toast('🔄 Re-processamento iniciado!');
-    clStartPolling();
-    setTimeout(clLoadStatus, 500);
-  } catch (err) { setAlert('cl-batch-alert', err.message, 'error'); }
-});
-
 /* ────── Compute clusters & render ────── */
 document.getElementById('btn-cl-compute').addEventListener('click', clComputeClusters);
 
 async function clComputeClusters() {
-  const kAuto = document.getElementById('btn-cl-k-auto').classList.contains('active');
-  const k = kAuto ? 'auto' : (parseInt(document.getElementById('cl-k-input').value) || 8);
+  const k = 'auto';
   const btn = document.getElementById('btn-cl-compute');
   setAlert('cl-compute-alert', '');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Calculando…';
   try {
-    const data = await api('GET', `/embeddings/clusters?k=${k}`);
+    const data = await api('GET', `/embeddings/clusters-by-analysis?k=${k}`);
     if (!data.clusters || !data.clusters.length) {
-      setAlert('cl-compute-alert', 'Nenhum embedding encontrado. Gere os embeddings primeiro.', 'info');
+      setAlert('cl-compute-alert', 'Nenhuma faixa analisada encontrada. Execute o batch de análise primeiro.', 'info');
       return;
     }
     CL.clusters = data;
@@ -2670,9 +2632,8 @@ async function clComputeClusters() {
     clRenderCurrent(data.clusters);
     clRenderLegend(data.clusters);
     clSelectCluster(null);
-    // Show actual k chosen (especially useful in Auto mode)
-    document.getElementById('cl-k-value').textContent = data.k;
-    toast(`${data.clusters.length} clusters · ${data.totalEmbedded} faixas`);
+    const total = data.totalAnalyzed ?? '?';
+    toast(`${data.clusters.length} clusters por análise de áudio · ${total} faixas`);
   } catch (err) {
     setAlert('cl-compute-alert', 'Erro: ' + err.message, 'error');
   } finally {
@@ -3224,6 +3185,356 @@ document.querySelectorAll('.mtr-period-btn').forEach(btn => {
    INIT
 ═══════════════════════════════════════════ */
 loadDashboard();
+
+/* ═══════════════════════════════════════════
+   NOVA PLAYLIST — Por Prompt + Por Música (cache-based)
+═══════════════════════════════════════════ */
+
+// ── Autocomplete helpers (reutilizados por várias abas) ───────────────────
+function acDedup(tracks, field) {
+  const seen = new Set();
+  return tracks.filter(t => {
+    const val = t[field];
+    if (seen.has(val)) return false;
+    seen.add(val);
+    return true;
+  });
+}
+
+function acHide(dropdownId) {
+  const el = document.getElementById(dropdownId);
+  if (el) el.style.display = 'none';
+}
+
+function acShow(dropdownId, items, renderItem, onSelect) {
+  const el = document.getElementById(dropdownId);
+  if (!items.length) { el.style.display = 'none'; return; }
+  el.innerHTML = items.map((item, i) => `
+    <div class="autocomplete-item" data-idx="${i}">
+      ${renderItem(item)}
+    </div>
+  `).join('');
+  el.style.display = '';
+  el.querySelectorAll('.autocomplete-item').forEach((row, i) => {
+    row.addEventListener('mousedown', e => {
+      e.preventDefault();
+      onSelect(items[i]);
+    });
+  });
+}
+
+// ── Cache de faixas analisadas (autocomplete + geração) ───────────────────
+let _cachedTracks       = [];   // [{ ratingKey, title, artist, album, analysis }]
+let _cachedTracksLoaded = false;
+let _cmSelectedTrack    = null; // faixa selecionada na aba "Por Música"
+
+async function npLoadCacheInfo() {
+  try {
+    const data     = await api('GET', '/audio/analysis-cache');
+    _cachedTracks       = Object.values(data.tracks || {});
+    _cachedTracksLoaded = true;
+    const count = _cachedTracks.length;
+
+    // "Por Prompt" info banner
+    const icon = document.getElementById('cp-cache-icon');
+    const text = document.getElementById('cp-cache-text');
+    const box  = document.getElementById('cp-cache-info');
+    if (count > 0) {
+      icon.textContent = '✅';
+      text.textContent = `${count} faixas analisadas no cache — o LLM usará os perfis de áudio para montar a playlist`;
+      box.style.borderLeftColor = 'var(--accent)';
+    } else {
+      icon.textContent = '⚠️';
+      text.textContent = 'Cache vazio — vá para "Análise da Biblioteca" para analisar as músicas primeiro';
+      box.style.borderLeftColor = 'var(--warning, #e5a50a)';
+    }
+
+    // "Por Música" count
+    document.getElementById('cm-cache-count').textContent = count;
+  } catch (err) {
+    document.getElementById('cp-cache-text').textContent = 'Erro ao carregar cache: ' + err.message;
+  }
+}
+
+// ── Autocomplete helpers para "Por Música" ────────────────────────────────
+function cmFilter(query, field) {
+  if (!query || query.length < 1) return [];
+  const q = query.toLowerCase();
+  return _cachedTracks
+    .filter(t => t[field] && String(t[field]).toLowerCase().includes(q))
+    .slice(0, 40);
+}
+
+function cmSelectTrack(track) {
+  _cmSelectedTrack = track;
+  document.getElementById('cm-sel-title').textContent = track.title || '—';
+  document.getElementById('cm-sel-meta').textContent  = [track.artist, track.album].filter(Boolean).join(' · ');
+
+  // Perfil de áudio em chips
+  const chips = document.getElementById('cm-analysis-chips');
+  const a = track.analysis || {};
+  const chipDefs = [
+    a.genre      && a.genre      !== 'Unknown' ? { label: a.genre,      accent: true  } : null,
+    a.subgenre   && a.subgenre   !== 'unknown' ? { label: a.subgenre                  } : null,
+    a.mood       && a.mood       !== 'unknown' ? { label: a.mood                      } : null,
+    a.energy     != null                       ? { label: `E:${a.energy}/10`          } : null,
+    a.valence    != null                       ? { label: `V:${a.valence}/10`         } : null,
+    a.danceability != null                     ? { label: `D:${a.danceability}/10`   } : null,
+    a.tempo      && a.tempo      !== 'unknown' ? { label: a.tempo                    } : null,
+    a.era        && a.era        !== 'unknown' ? { label: a.era                      } : null,
+    ...(a.emotionalTags || []).slice(0, 3).map(t => ({ label: t, muted: true })),
+  ].filter(Boolean);
+
+  chips.innerHTML = chipDefs.map(c =>
+    `<span style="background:var(--surface3);border:1px solid ${c.accent ? 'var(--accent)' : 'var(--border)'};` +
+    `color:${c.accent ? 'var(--accent)' : c.muted ? 'var(--text-muted)' : 'inherit'};` +
+    `padding:2px 8px;border-radius:20px;font-size:.76rem">${escHtml(c.label)}</span>`
+  ).join('');
+
+  document.getElementById('cm-selected-track').style.display = '';
+  document.getElementById('cm-pl-name').value = `Radio ${track.title}`;
+  document.getElementById('btn-cm-generate').disabled = false;
+
+  document.getElementById('cm-search-title').value  = track.title  || '';
+  document.getElementById('cm-search-artist').value = track.artist || '';
+  acHide('cm-autocomplete-title');
+  acHide('cm-autocomplete-artist');
+}
+
+// ── Autocomplete: título ──────────────────────────────────────────────────
+document.getElementById('cm-search-title').addEventListener('input', function() {
+  const artistF = document.getElementById('cm-search-artist').value.trim().toLowerCase();
+  let results   = cmFilter(this.value, 'title');
+  if (artistF) results = results.filter(t => (t.artist || '').toLowerCase().includes(artistF));
+  acShow('cm-autocomplete-title', results,
+    t => `<div class="ac-title">${escHtml(t.title)}</div><div class="ac-meta">${escHtml(t.artist || '')} · ${escHtml(t.album || '')}</div>`,
+    t => cmSelectTrack(t)
+  );
+});
+document.getElementById('cm-search-title').addEventListener('blur', () =>
+  setTimeout(() => acHide('cm-autocomplete-title'), 150)
+);
+
+// ── Autocomplete: artista ─────────────────────────────────────────────────
+document.getElementById('cm-search-artist').addEventListener('input', function() {
+  const results = acDedup(cmFilter(this.value, 'artist'), 'artist');
+  acShow('cm-autocomplete-artist', results,
+    t => `<div class="ac-title">${escHtml(t.artist || '')}</div>`,
+    t => {
+      document.getElementById('cm-search-artist').value = t.artist || '';
+      acHide('cm-autocomplete-artist');
+      document.getElementById('cm-search-title').dispatchEvent(new Event('input'));
+    }
+  );
+});
+document.getElementById('cm-search-artist').addEventListener('blur', () =>
+  setTimeout(() => acHide('cm-autocomplete-artist'), 150)
+);
+
+// ── "Por Prompt" — Gerar Playlist ────────────────────────────────────────
+document.getElementById('btn-cp-generate').addEventListener('click', async () => {
+  const btn    = document.getElementById('btn-cp-generate');
+  const prompt = document.getElementById('cp-prompt-text').value.trim();
+  if (!prompt) { setAlert('cp-prompt-alert', 'Digite uma descrição.', 'error'); return; }
+  if (!_cachedTracks.length) {
+    setAlert('cp-prompt-alert', 'Cache vazio — analise as músicas primeiro na página "Análise da Biblioteca".', 'error');
+    return;
+  }
+  setAlert('cp-prompt-alert', '');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Interpretando e selecionando…';
+  try {
+    const maxPerArtist  = parseInt(document.getElementById('cp-max-per-artist').value) || 3;
+    const discoveryRatio = document.getElementById('cp-discovery').checked ? 0.30 : 0;
+    const pl = await api('POST', '/playlists/from-cache-prompt', { prompt, maxPerArtist, discoveryRatio });
+    toast(`"${pl.name}" criada com ${pl.tracks.length} faixas! ✅`);
+    document.getElementById('cp-prompt-text').value = '';
+    document.querySelector('[data-page="playlists"]').click();
+    setTimeout(() => selectPlaylist(pl.id), 200);
+  } catch (err) {
+    setAlert('cp-prompt-alert', 'Erro: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '✨ Gerar Playlist';
+  }
+});
+
+// ── "Por Música" — Gerar Radio ────────────────────────────────────────────
+document.getElementById('btn-cm-generate').addEventListener('click', async () => {
+  if (!_cmSelectedTrack) return;
+  const btn  = document.getElementById('btn-cm-generate');
+  const name = document.getElementById('cm-pl-name').value.trim() || undefined;
+  const size = parseInt(document.getElementById('cm-pl-size').value) || 15;
+
+  setAlert('cm-pl-alert', '<span class="spinner"></span> Selecionando faixas similares do cache… (pode levar alguns minutos)', 'info');
+  document.getElementById('cm-pl-result').style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando…';
+
+  try {
+    const maxPerArtist  = parseInt(document.getElementById('cm-max-per-artist').value) || 3;
+    const discoveryRatio = document.getElementById('cm-discovery').checked ? 0.30 : 0;
+    const pl = await api('POST', '/playlists/from-cache-track', {
+      ratingKey: _cmSelectedTrack.ratingKey,
+      size,
+      name,
+      maxPerArtist,
+      discoveryRatio,
+    });
+
+    setAlert('cm-pl-alert', `✅ Playlist gerada com ${pl.tracks?.length || 0} faixas.`, 'success');
+
+    document.getElementById('cm-pl-title').textContent = pl.name || '—';
+    const metaParts = [
+      pl.genre  ? pl.genre  : null,
+      pl.mood   ? pl.mood   : null,
+      pl.energy ? `energia ${pl.energy}/10` : null,
+    ].filter(Boolean);
+    document.getElementById('cm-pl-meta').textContent = metaParts.join(' · ');
+
+    document.getElementById('cm-pl-tracks').innerHTML = (pl.tracks || []).map((t, i) => `
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:5px">
+        <span style="font-size:.72rem;color:var(--text-muted);min-width:22px;text-align:center">${i + 1}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title || '—')}</div>
+          <div style="font-size:.75rem;color:var(--text-muted)">${escHtml(t.grandparentTitle || '')}${t.parentTitle ? ' · ' + escHtml(t.parentTitle) : ''}</div>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('cm-pl-result').style.display = '';
+    document.getElementById('btn-cm-pl-goto').onclick = () => {
+      document.querySelector('[data-page="playlists"]').click();
+      setTimeout(() => selectPlaylist(pl.id), 200);
+    };
+    toast(`"${pl.name}" criada! ✅`);
+  } catch (err) {
+    setAlert('cm-pl-alert', 'Erro: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🎵 Gerar Radio';
+  }
+});
+
+/* ═══════════════════════════════════════════
+   ANALYSIS LIBRARY PAGE
+═══════════════════════════════════════════ */
+
+async function alLoadStats() {
+  try {
+    const [stats, cache] = await Promise.all([
+      api('GET', '/library/stats'),
+      api('GET', '/audio/analysis-cache'),
+    ]);
+    const total  = stats.totalTracks ?? 0;
+    const cached = cache.size ?? 0;
+    const pct    = total > 0 ? Math.round(cached / total * 100) : 0;
+    document.getElementById('al-stat-total').textContent  = total;
+    document.getElementById('al-stat-cached').textContent = cached;
+    document.getElementById('al-stat-pct').textContent    = pct + '%';
+
+    // Render last 20 tracked entries
+    const tracks = Object.values(cache.tracks || {}).slice(-20).reverse();
+    const el     = document.getElementById('al-cache-list');
+    if (!tracks.length) {
+      el.innerHTML = '<div style="font-size:.82rem;color:var(--text-muted);text-align:center;padding:20px">Nenhuma faixa analisada ainda.</div>';
+    } else {
+      el.innerHTML = tracks.map(t => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border)">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:.83rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</div>
+            <div style="font-size:.73rem;color:var(--text-muted)">${escHtml(t.artist)}${t.album ? ' · ' + escHtml(t.album) : ''}</div>
+          </div>
+          <div style="text-align:right;min-width:110px;flex-shrink:0">
+            <div style="font-size:.73rem;color:var(--accent)">${escHtml(t.analysis?.genre || '–')} · ${escHtml(t.analysis?.mood || '–')}</div>
+            <div style="font-size:.7rem;color:var(--text-muted)">${t.analysis?.energy != null ? 'E:' + t.analysis.energy + '/10' : ''}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch (err) {
+    setAlert('al-stats-alert', 'Erro ao carregar stats: ' + err.message, 'error');
+  }
+}
+
+document.getElementById('btn-al-refresh-stats').addEventListener('click', alLoadStats);
+
+document.getElementById('btn-al-clear-cache').addEventListener('click', async () => {
+  const confirmed = confirm(
+    '⚠️ Tem certeza que deseja limpar TODO o cache de análises?\n' +
+    'Todas as ' + (document.getElementById('al-stat-cached').textContent || '?') +
+    ' faixas analisadas serão removidas e precisarão ser re-analisadas.\n\n' +
+    'Esta ação não pode ser desfeita.'
+  );
+  if (!confirmed) return;
+  try {
+    await api('DELETE', '/audio/analysis-cache');
+    toast('Cache de análises limpo com sucesso.', 'ok');
+    alLoadStats();
+  } catch (err) {
+    setAlert('al-stats-alert', 'Erro ao limpar cache: ' + err.message, 'error');
+  }
+});
+
+// ── Batch progress polling ────────────────────────────────────────────────
+let _alPollTimer = null;
+
+function alStopPoll() {
+  if (_alPollTimer) { clearInterval(_alPollTimer); _alPollTimer = null; }
+}
+
+function alStartPoll() {
+  alStopPoll();
+  _alPollTimer = setInterval(async () => {
+    try {
+      const p = await api('GET', '/audio/batch-progress');
+      const progressWrap = document.getElementById('al-progress-wrap');
+      const abortBtn     = document.getElementById('btn-al-abort');
+      const startBtn     = document.getElementById('btn-al-start');
+      progressWrap.style.display = '';
+      document.getElementById('al-progress-text').textContent    = `${p.done + p.failed} / ${p.total}`;
+      document.getElementById('al-progress-pct').textContent     = p.pct + '%';
+      document.getElementById('al-progress-failed').textContent  = p.failed + ' falha' + (p.failed !== 1 ? 's' : '');
+      document.getElementById('al-progress-bar').style.width     = p.pct + '%';
+
+      if (!p.running) {
+        alStopPoll();
+        abortBtn.style.display = 'none';
+        startBtn.disabled = false;
+        setAlert('al-batch-alert', `✅ Concluído: ${p.done} analisadas, ${p.failed} falhas.`, 'success');
+        alLoadStats();
+      }
+    } catch { alStopPoll(); }
+  }, 3000);
+}
+
+document.getElementById('btn-al-start').addEventListener('click', async () => {
+  const maxAudioSecs  = parseInt(document.getElementById('al-max-secs').value) || 30;
+  const skipExisting  = document.getElementById('al-skip-existing').checked;
+  setAlert('al-batch-alert', '<span class="spinner"></span> Iniciando análise em lote…', 'info');
+  try {
+    await api('POST', '/audio/batch-analyze', { maxAudioSecs, skipExisting, concurrency: 1 });
+    document.getElementById('btn-al-start').disabled = true;
+    document.getElementById('btn-al-abort').style.display = '';
+    document.getElementById('al-progress-wrap').style.display = '';
+    setAlert('al-batch-alert', 'Análise em andamento… (atualizando a cada 3 s)', 'info');
+    alStartPoll();
+  } catch (err) {
+    setAlert('al-batch-alert', 'Erro: ' + err.message, 'error');
+  }
+});
+
+document.getElementById('btn-al-abort').addEventListener('click', async () => {
+  try {
+    await api('POST', '/audio/batch-analyze', { abort: true });
+    alStopPoll();
+    document.getElementById('btn-al-abort').style.display = 'none';
+    document.getElementById('btn-al-start').disabled = false;
+    setAlert('al-batch-alert', 'Análise cancelada.', 'warn');
+  } catch (err) {
+    setAlert('al-batch-alert', 'Erro ao cancelar: ' + err.message, 'error');
+  }
+});
 </script>
 </body>
 </html>

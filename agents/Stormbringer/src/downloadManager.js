@@ -12,7 +12,10 @@ class DownloadManager extends EventEmitter {
   constructor(config) {
     super();
     this.config = config;
-    this.client = new WebTorrent();
+    // natUpnp/natPmp desabilitados: em ambiente Docker/servidor o UPnP não está
+    // disponível e cada torrent adicionado chamaria ssdp.search() concorrentemente,
+    // acumulando listeners na mesma instância Ssdp e disparando MaxListenersExceededWarning.
+    this.client = new WebTorrent({ natUpnp: false, natPmp: false });
     this.activeTorrents = new Map();
     this.metadataEnricher = new MetadataEnricher(config);
     this.stateFile = path.join(__dirname, "../.download-state.json");

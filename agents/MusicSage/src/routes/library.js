@@ -2,11 +2,37 @@
  *  GET /api/library/history  — artistas e faixas mais ouvidas
  *  GET /api/library/metrics  — retrospectiva por período (week|month|year)
  *  GET /api/library/thumb    — proxy de artwork do Plex (evita expor PLEX_TOKEN)
+ *  GET /api/library/tracks   — lista resumida de todas as faixas (para autocomplete)
  */
-export function libraryRouter(router, { libraryScanner, historyService, metricsService }) {
+export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer }) {
   router.get("/library/stats", (_req, res) => {
     const stats = libraryScanner.getLibraryStats();
     res.json(stats);
+  });
+
+  /**
+   * GET /api/library/tracks
+   * Retorna lista resumida de todas as faixas para uso em autocomplete.
+   * Response: { tracks: [{ ratingKey, title, artist, album, filePath }] }
+   */
+  router.get("/library/tracks", async (_req, res) => {
+    try {
+      const { tracks } = await libraryScanner.scan();
+      const summary = tracks.map(t => {
+        const plexPath = t.Media?.[0]?.Part?.[0]?.file || "";
+        const filePath = audioAnalyzer ? audioAnalyzer._resolvePath(plexPath) || plexPath : plexPath;
+        return {
+          ratingKey: t.ratingKey,
+          title:     t.title            || "",
+          artist:    t.grandparentTitle || "",
+          album:     t.parentTitle      || "",
+          filePath,
+        };
+      });
+      res.json({ tracks: summary });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get("/library/history", async (_req, res) => {

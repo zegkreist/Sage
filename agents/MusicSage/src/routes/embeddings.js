@@ -10,7 +10,7 @@
  * DELETE /api/embeddings/reset         — apaga todos os embeddings armazenados
  */
 
-export function embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder } = {}) {
+export function embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache } = {}) {
 
   /**
    * POST /api/embeddings/start
@@ -129,5 +129,40 @@ export function embeddingsRouter(router, { embeddingService, clusteringService, 
     }
     embeddingService.reset();
     res.json({ reset: true });
+  });
+
+  /**
+   * GET /api/embeddings/clusters-by-analysis?k=8
+   *
+   * Agrupa faixas por similaridade de áudio (energy, valence, danceability,
+   * acousticness, complexity, bpm) sem usar embeddings vetoriais.
+   * Não requer batch de embeddings — usa apenas o analysis-cache.json.
+   */
+  router.get("/embeddings/clusters-by-analysis", (req, res) => {
+    if (!clusteringService) {
+      return res.status(503).json({ error: "ClusteringService indisponível" });
+    }
+    if (!analysisCache) {
+      return res.status(503).json({ error: "AnalysisCache indisponível" });
+    }
+    const entries = analysisCache.getAll();
+    const analyzed = entries.filter((e) => e.analysis);
+    if (analyzed.length < 2) {
+      return res.status(400).json({
+        error: `São necessárias pelo menos 2 faixas analisadas (atual: ${analyzed.length}). Execute o batch de análise primeiro.`,
+      });
+    }
+    try {
+      let result;
+      if (req.query.k === 'auto') {
+        result = clusteringService.clusterByAnalysisAuto(analyzed);
+      } else {
+        const k = Math.max(2, Math.min(20, parseInt(req.query.k) || 8));
+        result = clusteringService.clusterByAnalysis(analyzed, k);
+      }
+      res.json({ ...result, totalAnalyzed: analyzed.length });
+    } catch (err) {
+      res.status(500).json({ error: "Falha na clusterização por áudio: " + err.message });
+    }
   });
 }

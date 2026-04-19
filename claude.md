@@ -83,7 +83,7 @@ Webserver Express.js de recomendações musicais com **frontend SPA** integrado.
 | Dashboard | Stats grid (artistas/álbuns/faixas/status), top géneros chips, top artistas e faixas mais ouvidas |
 | Recomendações | Grid filtrável por gênero + painel recolhível de artistas semelhantes (Last.fm + Ollama) |
 | Playlists | Layout 2 painéis: lista à esquerda, detalhe + faixas editáveis à direita; sync com Plex |
-| Nova Playlist | Tabs: "Por Critérios" (mood/gênero/energia/tamanho) e "Por Prompt" (Ollama interpreta) |
+| Nova Playlist | 2 tabs **cache-based**: "✨ Por Prompt" (LLM interpreta texto livre com perfis de áudio) e "🎵 Por Música" (Radio XPTO — usa faixa já analisada como referência) |
 | Downloads | Stormbringer (torrent), TideCaller (Tidal URL ou browser de artista), Transporter + monitor ativo |
 
 **Como iniciar:**
@@ -103,7 +103,7 @@ xdg-open http://localhost:3002
 PLEX_URL=http://localhost:32400
 PLEX_TOKEN=<token-do-plex>
 OLLAMA_URL=http://192.168.15.94:11434
-OLLAMA_DEFAULT_MODEL=qwen3:14b
+OLLAMA_DEFAULT_MODEL=gemma4:e4b
 MUSICSAGE_PORT=3002             # opcional, padrão 3002
 LASTFM_API_KEY=<chave>          # opcional — habilita artistas semelhantes via Last.fm
 MUSICSAGE_DEBUG=1               # opcional — logs verbosos
@@ -119,18 +119,24 @@ GET  /api/recommendations/artists?limit=N          → artistas-only
 GET  /api/recommendations/similar?artist=X&limit=N → artistas semelhantes (Last.fm + Ollama)
 POST /api/playlists/generate                       → { name?, mood?, genre?, energy?, size? }
 POST /api/playlists/from-prompt                    → { prompt: "texto livre" }
+POST /api/playlists/from-cache-prompt              → { prompt } — monta playlist com perfis do analysis-cache
+POST /api/playlists/from-cache-track               → { ratingKey, size?, name? } — Radio [Título] usando cache
 GET  /api/playlists                                → lista playlists salvas
 GET  /api/playlists/:id                            → playlist por id
 PATCH /api/playlists/:id                           → { name?, tracks? } — edita e sincroniza Plex
 DELETE /api/playlists/:id                          → remove (e do Plex se sincronizado)
 POST /api/playlists/:id/push-to-plex               → cria/re-cria playlist no Plex
+GET  /api/audio/analyze                            → status do batch de análise
+DELETE /api/audio/analysis-cache                   → limpa o cache de análises (409 se batch rodando)
 ```
 
 **Sincronização Plex:** PATCH rename → `PUT /playlists/:plexId?title=...`; PATCH tracks → delete+push; DELETE → limpa do Plex; push-to-plex → overwrite idempotente. Auto-healing: se `plexId` estiver obsoleto, recria automaticamente.
 
 **Persistência:** playlists (incluindo `plexId`) salvas em `mediasage/playlists/playlists.json`
 
-**Arquitetura:** 7 serviços por DI — `LibraryScanner`, `HistoryService`, `MusicAnalyzer`, `RecommendationEngine`, `PlaylistBuilder`, `PlexService`, `LastFmService`. **82 testes** (unit + integração).
+**Arquitetura:** 8 serviços por DI — `LibraryScanner`, `HistoryService`, `MusicAnalyzer`, `AnalysisCacheService`, `RecommendationEngine`, `PlaylistBuilder`, `PlexService`, `LastFmService`. **82 testes** (unit + integração).
+
+**Analysis cache** (`mediasage/analysis-cache.json`): armazena perfil completo de cada faixa analisada. Cada entrada inclui: `genre`, `subgenre`, `mood`, `energy`, `valence`, `danceability`, `acousticness`, `complexity`, `bpm`, `key`, `tempo`, `rhythmPattern`, `timbre`, `dynamics`, `texture`, `vocalStyle`, `productionStyle`, `era`, `characteristics[]`, `instruments[]`, `emotionalTags[]`. O `PlaylistBuilder` envia esses perfis em lotes de 50 para o LLM (torneio de seleção) com pré-filtro de similaridade (70% gênero/mood/energia + 30% aleatório).
 
 ### SeriesCurator (`@plex-agents/seriescurator`)
 Organiza e renomeia séries de TV em `tv/`.

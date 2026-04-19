@@ -24,7 +24,7 @@ function _tryPushToPlex(plexService, playlistBuilder, saved) {
     });
 }
 
-export function playlistsRouter(router, { playlistBuilder, plexService } = {}) {
+export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache } = {}) {
   // POST /api/playlists/generate
   router.post("/playlists/generate", async (req, res) => {
     const { name, mood, genre, energy, size } = req.body || {};
@@ -69,6 +69,61 @@ export function playlistsRouter(router, { playlistBuilder, plexService } = {}) {
       _tryPushToPlex(plexService, playlistBuilder, saved);
       res.status(201).json(saved);
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/playlists/from-cache-prompt — gera playlist via LLM usando perfis de áudio do cache
+  router.post("/playlists/from-cache-prompt", async (req, res) => {
+    if (!analysisCache) return res.status(503).json({ error: "AnalysisCacheService não disponível" });
+    const { prompt, maxPerArtist, discoveryRatio } = req.body || {};
+    if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+      return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
+    }
+    const opts = {
+      maxPerArtist:  maxPerArtist  != null ? Math.max(1, parseInt(maxPerArtist,  10)) : 3,
+      discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0,
+    };
+    try {
+      const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, opts);
+      const saved    = playlistBuilder.save(playlist);
+      _tryPushToPlex(plexService, playlistBuilder, saved);
+      res.status(201).json(saved);
+    } catch (err) {
+      import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-prompt erro: ${err.message}`));
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/playlists/from-cache-track — gera playlist "Radio" a partir de uma faixa analisada
+  router.post("/playlists/from-cache-track", async (req, res) => {
+    if (!analysisCache) return res.status(503).json({ error: "AnalysisCacheService não disponível" });
+    const { ratingKey, size, name, maxPerArtist, discoveryRatio } = req.body || {};
+    if (!ratingKey) return res.status(400).json({ error: "Campo 'ratingKey' é obrigatório" });
+
+    const cached = analysisCache.get(String(ratingKey));
+    if (!cached) {
+      return res.status(404).json({ error: "Faixa não encontrada no cache — analise-a primeiro na página 'Análise da Biblioteca'." });
+    }
+    const opts = {
+      size:           size           ? parseInt(size, 10) : 15,
+      name,
+      maxPerArtist:  maxPerArtist  != null ? Math.max(1, parseInt(maxPerArtist,  10)) : 3,
+      discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0,
+    };
+    try {
+      const playlist = await playlistBuilder.generateFromCacheWithTrack(
+        cached.analysis,
+        cached.title,
+        ratingKey,
+        analysisCache,
+        opts
+      );
+      const saved = playlistBuilder.save(playlist);
+      _tryPushToPlex(plexService, playlistBuilder, saved);
+      res.status(201).json(saved);
+    } catch (err) {
+      import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-track erro: ${err.message}`));
       res.status(500).json({ error: err.message });
     }
   });

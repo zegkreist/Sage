@@ -7,6 +7,7 @@ import { recommendationsRouter } from "./routes/recommendations.js";
 import { playlistsRouter } from "./routes/playlists.js";
 import { embeddingsRouter } from "./routes/embeddings.js";
 import { toolsRouter } from "./routes/tools.js";
+import { audioRouter } from "./routes/audio.js";
 import { logger } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {{ libraryScanner, historyService, recommendationEngine, playlistBuilder }} deps
  * @returns {import('express').Application}
  */
-export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService } = {}) {
+export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache } = {}) {
   const app = express();
 
   app.use(express.json({ limit: '10mb' })); // tracks Plex são ~3KB cada; playlists grandes podem exceder 100 KB
@@ -39,10 +40,11 @@ export function createServer({ libraryScanner, historyService, recommendationEng
   });
 
   healthRouter(router);
-  libraryRouter(router, { libraryScanner, historyService, metricsService });
+  libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer });
   recommendationsRouter(router, { recommendationEngine });
-  playlistsRouter(router, { playlistBuilder, plexService });
-  embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder });
+  playlistsRouter(router, { playlistBuilder, plexService, analysisCache });
+  embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });
+  audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner });
   toolsRouter(router);
 
   app.use("/api", router);

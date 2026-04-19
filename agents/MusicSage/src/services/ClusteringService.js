@@ -110,6 +110,156 @@ export class ClusteringService {
     return { k, clusters };
   }
 
+  /**
+   * Agrupa faixas por similaridade de áudio usando os campos do analysis-cache.
+   * Vetor por faixa: [energy, valence, danceability, acousticness, complexity, bpm] — normalizados.
+   * Não requer embeddings vetoriais.
+   *
+   * @param {Array<{ratingKey,title,artist,analysis}>} entries — entradas do AnalysisCacheService
+   * @param {number} k — número de clusters (2–20)
+   * @returns {ReturnType<ClusteringService["cluster"]>}
+   */
+  clusterByAnalysis(entries, k = 8) {
+    if (!entries?.length) return { k, clusters: [] };
+
+    const valid = entries.filter((e) => e.analysis && typeof e.analysis.energy === "number");
+    if (valid.length < 2) return { k, clusters: [] };
+
+    k = Math.min(k, valid.length);
+
+    // Vetor de características normalizadas por faixa
+    const vectors = valid.map((e) => {
+      const a = e.analysis;
+      return [
+        (a.energy       ?? 5) / 10,
+        (a.valence      ?? 5) / 10,
+        (a.danceability ?? 5) / 10,
+        (a.acousticness ?? 5) / 10,
+        (a.complexity   ?? 5) / 10,
+        Math.min(a.bpm  ?? 120, 200) / 200,
+      ];
+    });
+
+    // Centra os dados
+    const mean    = this._meanVector(vectors);
+    const centered = vectors.map((v) => v.map((x, i) => x - mean[i]));
+
+    // PCA: até 6 dimensões (tamanho do vetor)
+    const PCA_DIMS = Math.min(6, centered[0].length);
+    const pcs = this._pcaNd(centered, PCA_DIMS, 40);
+
+    // Projeta para espaço PCA_DIMS (para clustering)
+    const projectedNd = centered.map((v) => pcs.map((pc) => this._dot(v, pc)));
+
+    // K-means
+    const { assignments } = this._kmeansNd(projectedNd, k);
+
+    // Projeção 3D para visualização
+    const pc1 = pcs[0] ?? new Array(centered[0].length).fill(0);
+    const pc2 = pcs[1] ?? new Array(centered[0].length).fill(0);
+    const pc3 = pcs[2] ?? new Array(centered[0].length).fill(0);
+    const projected = centered.map((v) => [this._dot(v, pc1), this._dot(v, pc2), this._dot(v, pc3)]);
+
+    // Normaliza coords para [0, 1]
+    const xs = projected.map((p) => p[0]);
+    const ys = projected.map((p) => p[1]);
+    const zs = projected.map((p) => p[2]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+    const nx = (x) => maxX !== minX ? (x - minX) / (maxX - minX) : 0.5;
+    const ny = (y) => maxY !== minY ? (y - minY) / (maxY - minY) : 0.5;
+    const nz = (z) => maxZ !== minZ ? (z - minZ) / (maxZ - minZ) : 0.5;
+
+    const clusters = Array.from({ length: k }, (_, i) => ({
+      id:     i,
+      color:  ClusteringService.COLORS[i % ClusteringService.COLORS.length],
+      count:  0,
+      tracks: [],
+    }));
+
+    valid.forEach((entry, j) => {
+      const cl  = assignments[j];
+      const [px, py, pz] = projected[j];
+      const a   = entry.analysis;
+      clusters[cl].tracks.push({
+        ratingKey: entry.ratingKey,
+        title:     entry.title   || "",
+        artist:    entry.artist  || "",
+        album:     entry.album   || "",
+        genres:    a.genre ? [a.genre] : [],
+        genre:     a.genre       || "",
+        subgenre:  a.subgenre    || "",
+        mood:      a.mood        || "",
+        energy:    a.energy      ?? 0,
+        valence:   a.valence     ?? 0,
+        bpm:       a.bpm         ?? 0,
+        x: nx(px),
+        y: ny(py),
+        z: nz(pz),
+      });
+      clusters[cl].count++;
+    });
+
+    return { k, clusters };
+  }
+
+  /**
+   * Detecta automaticamente o k ideal para análise de áudio usando o Elbow Method.
+   * Testa k em [kMin..kMax], computa inércia e escolhe o cotovelo da curva.
+   *
+   * @param {Array<{ratingKey,title,artist,analysis}>} entries — entradas do AnalysisCacheService
+   * @param {number} kMin — k mínimo a testar (padrão 2)
+   * @param {number} kMax — k máximo a testar (padrão 15)
+   * @returns {ReturnType<ClusteringService["clusterByAnalysis"]>}
+   */
+  clusterByAnalysisAuto(entries, kMin = 2, kMax = 15) {
+    const valid = (entries || []).filter((e) => e.analysis && typeof e.analysis.energy === "number");
+    if (valid.length < 2) return { k: 1, clusters: [] };
+
+    const cappedMax = Math.min(kMax, valid.length);
+    const cappedMin = Math.min(kMin, cappedMax);
+    if (cappedMin >= cappedMax) return this.clusterByAnalysis(entries, cappedMin);
+
+    // Constrói vetores uma única vez
+    const vectors = valid.map((e) => {
+      const a = e.analysis;
+      return [
+        (a.energy       ?? 5) / 10,
+        (a.valence      ?? 5) / 10,
+        (a.danceability ?? 5) / 10,
+        (a.acousticness ?? 5) / 10,
+        (a.complexity   ?? 5) / 10,
+        Math.min(a.bpm  ?? 120, 200) / 200,
+      ];
+    });
+
+    const mean     = this._meanVector(vectors);
+    const centered = vectors.map((v) => v.map((x, i) => x - mean[i]));
+    const PCA_DIMS = Math.min(6, centered[0].length);
+    const pcs      = this._pcaNd(centered, PCA_DIMS, 40);
+    const projected = centered.map((v) => pcs.map((pc) => this._dot(v, pc)));
+
+    // Calcula inércia para cada k candidato
+    const kRange = [];
+    for (let k = cappedMin; k <= cappedMax; k++) kRange.push(k);
+
+    const inertias = kRange.map((k) => {
+      const { assignments, centroids } = this._kmeansNd(projected, k);
+      return this._inertia(projected, centroids, assignments);
+    });
+
+    // Elbow: maximiza a segunda derivada da curva de inércia
+    let bestIdx = 0;
+    let bestElbow = -Infinity;
+    for (let i = 1; i < inertias.length - 1; i++) {
+      const elbow = inertias[i - 1] + inertias[i + 1] - 2 * inertias[i];
+      if (elbow > bestElbow) { bestElbow = elbow; bestIdx = i; }
+    }
+    const bestK = kRange[bestIdx];
+    return this.clusterByAnalysis(entries, bestK);
+  }
+
   // ─── PCA via Power Iteration ────────────────────────────────────────────────
 
   /**

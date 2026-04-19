@@ -103,6 +103,72 @@ export class EmbeddingService {
   }
 
   /**
+   * Gera (ou re-gera) o embedding de uma faixa usando análise de áudio nativa
+   * do gemma4 via Ollama (o áudio é convertido para WAV 16kHz e enviado pelo
+   * campo `images`).
+   *
+   * A descrição resultante inclui instrumentação, timbre, dinâmica e estilo
+   * vocal detectados diretamente no áudio — muito mais ricos do que os
+   * metadados do Plex.
+   *
+   * @param {object} track           — track metadata do Plex (mínimo: title, artist, album, genres)
+   * @param {string} localPath       — caminho absoluto do arquivo de áudio
+   * @param {string} ratingKey       — chave única da faixa no Plex
+   * @param {object} [analyzer]      — instância MusicAnalyzer (opcional; usa this._musicAnalyzer se não passado)
+   * @param {object} [options]
+   * @param {number} [options.maxAudioSecs=30]
+   * @returns {Promise<{ embedding: number[], description: string, analysis: object }>}
+   */
+  async embedTrackWithAudio(track, localPath, ratingKey, analyzer, options = {}) {
+    if (!analyzer) throw new Error("embedTrackWithAudio requer uma instância MusicAnalyzer");
+
+    const analysis = await analyzer.analyzeAudioFile(localPath, {
+      title:  track.title,
+      artist: track.artist,
+      album:  track.album,
+      genres: track.genres,
+    }, options);
+
+    // Constrói descrição semântica rica a partir da análise de áudio
+    const parts = [
+      `"${track.title || "Unknown"}" by ${track.artist || "Unknown Artist"}`,
+      track.album ? `, album "${track.album}"` : "",
+      `. Genre: ${analysis.genre}.`,
+      ` Mood: ${analysis.mood}, energy ${analysis.energy}/10.`,
+      analysis.timbre    ? ` Timbre: ${analysis.timbre}.`                       : "",
+      analysis.tempo     ? ` Tempo: ${analysis.tempo}.`                         : "",
+      analysis.dynamics  ? ` Dynamics: ${analysis.dynamics}.`                   : "",
+      analysis.vocalStyle && analysis.vocalStyle !== "unknown"
+                         ? ` Vocals: ${analysis.vocalStyle}.`                   : "",
+      analysis.instruments?.length
+                         ? ` Instruments: ${analysis.instruments.join(", ")}.`  : "",
+      analysis.characteristics?.length
+                         ? ` Characteristics: ${analysis.characteristics.join(", ")}.` : "",
+    ];
+    const description = parts.filter(Boolean).join("").trim();
+
+    const embedding = await this._fetchEmbedding(description);
+
+    const entry = {
+      embedding,
+      description,
+      analysis,
+      title:       track.title  || "",
+      artist:      track.artist || "",
+      album:       track.album  || "",
+      genres:      track.genres || [],
+      processedAt: new Date().toISOString(),
+      source:      "audio",
+    };
+
+    this._store[String(ratingKey)] = entry;
+    this._saveStore();
+
+    logger.info("EMBEDDING", `Embedding por áudio salvo: "${track.title}" (${ratingKey})`);
+    return { embedding, description, analysis };
+  }
+
+  /**
    * Inicia o processamento em lote da biblioteca inteira.
    * Tracks já processadas são ignoradas (cache por ratingKey).
    * @param {{ force?: boolean }} options — force=true reprocessa tudo
