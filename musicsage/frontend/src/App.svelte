@@ -12,6 +12,7 @@
   import AnalysisLibrary from './pages/AnalysisLibrary.svelte';
   import Downloads       from './pages/Downloads.svelte';
   import Logs            from './pages/Logs.svelte';
+  import PlexStatus      from './pages/PlexStatus.svelte';
 </script>
 
 <div class="flex h-screen w-full overflow-hidden bg-bg text-white">
@@ -34,6 +35,8 @@
       <Downloads />
     {:else if $currentPage === 'logs'}
       <Logs />
+    {:else if $currentPage === 'plex-status'}
+      <PlexStatus />
     {:else}
       <Dashboard />
     {/if}

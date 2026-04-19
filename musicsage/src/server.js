@@ -9,6 +9,7 @@ import { embeddingsRouter } from "./routes/embeddings.js";
 import { toolsRouter } from "./routes/tools.js";
 import { audioRouter } from "./routes/audio.js";
 import { logsRouter } from "./routes/logs.js";
+import { plexRouter } from "./routes/plex.js";
 import { logger } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,7 @@ export function createServer({ libraryScanner, historyService, recommendationEng
   embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });
   audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner });
   toolsRouter(router);
+  plexRouter(router, { plexService });
 
   app.use("/api", router);
 

@@ -91,6 +91,25 @@ export class PlexService {
   }
 
   /**
+   * Verifica a conectividade com o Plex e retorna informações do servidor.
+   * @returns {Promise<{ name: string, version: string, machineIdentifier: string, platform: string, platformVersion: string }>}
+   */
+  async checkConnection() {
+    const res = await this.axios.get(`${this.plexUrl}/identity`, {
+      headers: this._headers,
+      timeout: 8000,
+    });
+    const mc = res.data?.MediaContainer ?? {};
+    return {
+      name:              mc.friendlyName      ?? "Desconhecido",
+      version:           mc.version           ?? "?",
+      machineIdentifier: mc.machineIdentifier ?? "?",
+      platform:          mc.platform          ?? "",
+      platformVersion:   mc.platformVersion   ?? "",
+    };
+  }
+
+  /**
    * Retorna as contas (usuários) que têm acesso ao servidor Plex.
    * @returns {Promise<Array<{id: number, name: string, thumb: string|null}>>}
    */

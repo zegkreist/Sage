@@ -22,8 +22,9 @@
     {
       label: 'Ferramentas',
       items: [
-        { page: 'downloads', icon: '↓', label: 'Downloads' },
-        { page: 'logs',      icon: '⊞', label: 'Logs' },
+        { page: 'downloads',   icon: '↓', label: 'Downloads' },
+        { page: 'logs',        icon: '⊞', label: 'Logs' },
+        { page: 'plex-status', icon: '⚡', label: 'Conexão Plex' },
       ],
     },
   ];
