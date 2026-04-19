@@ -1,0 +1,39 @@
+# Node modules
+node_modules/
+frontend/node_modules/
+
+# Build artifacts
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Development config
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+coverage/
+tests/results/
+playwright-report/
+
+# Python virtual envs
+tidecaller/.venv/
+tidecaller/__pycache__/
+transporter/node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/

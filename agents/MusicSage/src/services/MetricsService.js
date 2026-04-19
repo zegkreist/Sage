@@ -41,16 +41,20 @@ export class MetricsService {
   /**
    * Retorna métricas de reprodução agregadas para o período solicitado.
    * @param {"week"|"month"|"year"} period
+   * @param {number|null} userId — accountID Plex para filtrar por usuário (null = todos)
    * @returns {Promise<object>}
    */
-  async getMetrics(period = "month") {
+  async getMetrics(period = "month", userId = null) {
     await this._findMusicSection();
     const startTs = this._periodStart(period);
+
+    const trackParams = { type: 10, sort: "lastViewedAt:desc", limit: 2000 };
+    if (userId) trackParams.accountID = userId;
 
     // Faixas ordenadas por lastViewedAt decrescente
     const trackRes = await this.axios.get(
       `${this.plexUrl}/library/sections/${this._musicKey}/all`,
-      { headers: this._headers, params: { type: 10, sort: "lastViewedAt:desc", limit: 2000 } }
+      { headers: this._headers, params: trackParams }
     );
     const allTracks = trackRes.data?.MediaContainer?.Metadata || [];
 
@@ -59,10 +63,13 @@ export class MetricsService {
       ? allTracks.filter((t) => (t.lastViewedAt || 0) >= startTs)
       : allTracks;
 
+    const artistParams = { type: 8, limit: 2000 };
+    if (userId) artistParams.accountID = userId;
+
     // Artistas: para gêneros e thumb
     const artistRes = await this.axios.get(
       `${this.plexUrl}/library/sections/${this._musicKey}/all`,
-      { headers: this._headers, params: { type: 8, limit: 2000 } }
+      { headers: this._headers, params: artistParams }
     );
     const artistMeta = artistRes.data?.MediaContainer?.Metadata || [];
     const artistMap  = Object.fromEntries(artistMeta.map((a) => [a.title, a]));

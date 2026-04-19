@@ -89,4 +89,20 @@ export class PlexService {
     await this.deletePlaylist(plexRatingKey);
     return this.pushPlaylist(name, ratingKeys);
   }
+
+  /**
+   * Retorna as contas (usuários) que têm acesso ao servidor Plex.
+   * @returns {Promise<Array<{id: number, name: string, thumb: string|null}>>}
+   */
+  async getUsers() {
+    const res = await this.axios.get(`${this.plexUrl}/accounts`, {
+      headers: this._headers,
+    });
+    const accounts = res.data?.MediaContainer?.Account || [];
+    return accounts.map((a) => ({
+      id:    a.id,
+      name:  a.name || a.title || 'Usuário',
+      thumb: a.thumb || null,
+    }));
+  }
 }

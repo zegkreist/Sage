@@ -5,13 +5,18 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest tests/unit",
+    "start":          "node index.js",
+    "dev":            "node --watch index.js",
+    "build:ui":       "cd frontend && npm run build",
+    "sync:ui":        "cp -r frontend/dist/. public/",
+    "build":          "npm run build:ui && npm run sync:ui",
+    "prod":           "npm run build && node index.js",
+    "dev:ui":         "cd frontend && npm run dev",
+    "test":           "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:unit":      "NODE_OPTIONS=--experimental-vm-modules jest tests/unit",
     "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest tests/integration",
-    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
-    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage"
+    "test:watch":     "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage":  "NODE_OPTIONS=--experimental-vm-modules jest --coverage"
   },
   "keywords": [
     "plex",

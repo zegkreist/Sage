@@ -77,14 +77,36 @@ Webserver Express.js de recomendações musicais com **frontend SPA** integrado.
 - **Sincroniza playlists bidireccionalmente com o Plex** (rename, update faixas, delete)
 - **Frontend SPA dark-theme** acessível em `http://localhost:3002`
 
-**Seções do frontend (redesenhadas):**
+**Seções do frontend (redesenhadas — design system Spotify/Vercel):**
 | Seção | Função |
 |---|---|
-| Dashboard | Stats grid (artistas/álbuns/faixas/status), top géneros chips, top artistas e faixas mais ouvidas |
-| Recomendações | Grid filtrável por gênero + painel recolhível de artistas semelhantes (Last.fm + Ollama) |
-| Playlists | Layout 2 painéis: lista à esquerda, detalhe + faixas editáveis à direita; sync com Plex |
-| Nova Playlist | 2 tabs **cache-based**: "✨ Por Prompt" (LLM interpreta texto livre com perfis de áudio) e "🎵 Por Música" (Radio XPTO — usa faixa já analisada como referência) |
-| Downloads | Stormbringer (torrent), TideCaller (Tidal URL ou browser de artista), Transporter + monitor ativo |
+| Dashboard | Hero stats grid (artistas/álbuns/faixas/playlists), curiosidades cards, retrospectiva com thumbnails + play counts + horas, seletor de usuário Plex, mood do dia/mês |
+| Recomendações | Cards com `whyRecommended` como descrição, gênero como badge, busca de artistas similares (Last.fm + Ollama), botões ∿ TideCaller / ↯ Stormbringer |
+| Playlists | Layout 2 painéis (lista / detalhe), faixas editáveis, sync com Plex |
+| Nova Playlist | 2 tabs: "✨ Por Prompt" e "🎵 Por Música" (Radio) usando analysis-cache |
+| Clusters | Toggle 2D/3D, visualização vetorial da biblioteca |
+| Análise de Áudio | Progress bar, badges inline, análise em batch |
+| Downloads | Tab pill switcher, Stormbringer + TideCaller + Transporter |
+| Logs | Viewer de logs em tempo real com filtros por nível (INFO/WARN/ERROR/DEBUG/HTTP), auto-refresh, ação de zerar log do dia ou todos |
+
+**Design System aplicado:**
+- Paleta: `bg:#0a0a0f`, `surface:#111118`, `accent:#7c6af5`, `positive:#1db954`
+- Componentes: `.text-gradient`, `.glass`, `.card`, `.nav-active`, `.rank-chip` (.top1/.top2/.top3), `.list-row`, `.stat-value`, `.progress-bar`
+- Layout: `w-full` em todas as páginas (sem `max-w-screen-xl`), sidebar fixa com `var(--sidebar-w)`
+- Tipografia: `text-2xs` customizado, `stat-value`, `text-gradient` via CSS classes
+
+**Retrospectiva (Dashboard):**
+- Resumo acima da tabela: Reproduções / Horas ouvidas / Faixas únicas / Artistas únicos
+- Thumbnails de artistas e álbuns via `/api/library/thumb?path=`
+- Campo correto: `playCount` (não `plays`/`count`)
+- Gêneros: play count + contagem de faixas
+
+**Usuário Plex:**
+- Seletor no header do Dashboard: filtra métricas por conta do Plex
+- `GET /api/library/users` → lista de contas via `PlexService.getUsers()`
+- `GET /api/library/metrics?period=&userId=` → aceita filtro por `accountID`
+
+**Caminho dos logs:** `mediasage/logs/musicsage-YYYY-MM-DD.log` — um arquivo por dia. Controle via tela Logs ou `DELETE /api/logs`.
 
 **Como iniciar:**
 ```bash
@@ -94,39 +116,54 @@ node plex-cli.js musicsage:start
 # Ou direto
 cd agents/MusicSage && node index.js
 
+# Build Docker
+./build-docker.sh              # tag musicsage:latest
+./build-docker.sh --tag v1.0   # tag customizada
+./build-docker.sh --no-cache   # sem cache
+
 # Abrir Interface Web
 xdg-open http://localhost:3002
 ```
 
-**Variáveis de ambiente necessárias:**
+**Variáveis de ambiente necessárias (veja `agents/MusicSage/.env.example`):**
 ```env
-PLEX_URL=http://localhost:32400
-PLEX_TOKEN=<token-do-plex>
-OLLAMA_URL=http://192.168.15.94:11434
-OLLAMA_DEFAULT_MODEL=gemma4:e4b
-MUSICSAGE_PORT=3002             # opcional, padrão 3002
-LASTFM_API_KEY=<chave>          # opcional — habilita artistas semelhantes via Last.fm
-MUSICSAGE_DEBUG=1               # opcional — logs verbosos
+PLEX_URL=http://localhost:32400       # URL do servidor Plex
+PLEX_TOKEN=<token-do-plex>            # Token API do Plex
+OLLAMA_URL=http://localhost:11434     # LLM local
+OLLAMA_DEFAULT_MODEL=gemma4:e4b       # Modelo de geração
+EMBEDDING_MODEL=nomic-embed-text      # Modelo de embeddings (Ollama)
+PLEX_MEDIA_ROOT=/path/to/music        # Caminho host para os arquivos de música
+PLEX_PATH_PREFIX=/music               # Prefixo de path do Plex (mapeado para PLEX_MEDIA_ROOT)
+MUSICSAGE_PORT=3002                   # Porta HTTP (padrão 3002)
+LASTFM_API_KEY=<chave>                # Opcional — artistas semelhantes via Last.fm
+MUSICSAGE_DEBUG=1                     # Opcional — logs verbosos
 ```
 
 **API REST** (para uso programático):
 ```
 GET  /api/health                                   → status do servidor
-GET  /api/library/stats                            → totais + top géneros
+GET  /api/library/stats                            → totais + top géneros + totalPlaylists
+GET  /api/library/users                            → lista de contas/usuários Plex
 GET  /api/library/history                          → top artistas e faixas (Plex viewCount)
-GET  /api/recommendations?limit=N&genre=X          → artistas recomendados
-GET  /api/recommendations/artists?limit=N          → artistas-only
+GET  /api/library/metrics?period=&userId=          → retrospectiva com thumbnails e playCounts
+GET  /api/library/thumb?path=                      → proxy de artwork do Plex
+GET  /api/library/curiosidades                     → fatos curiosos da biblioteca (analysis-cache)
+GET  /api/library/mood?period=day|month            → mood calculado via analysis
+GET  /api/library/recently-played?limit=N          → histórico recente com ratingKey
+GET  /api/recommendations?limit=N&genre=X          → artistas recomendados (com whyRecommended)
 GET  /api/recommendations/similar?artist=X&limit=N → artistas semelhantes (Last.fm + Ollama)
 POST /api/playlists/generate                       → { name?, mood?, genre?, energy?, size? }
 POST /api/playlists/from-prompt                    → { prompt: "texto livre" }
 POST /api/playlists/from-cache-prompt              → { prompt } — monta playlist com perfis do analysis-cache
-POST /api/playlists/from-cache-track               → { ratingKey, size?, name? } — Radio [Título] usando cache
+POST /api/playlists/from-cache-track               → { ratingKey, size?, name? } — Radio [Título]
 GET  /api/playlists                                → lista playlists salvas
-GET  /api/playlists/:id                            → playlist por id
 PATCH /api/playlists/:id                           → { name?, tracks? } — edita e sincroniza Plex
 DELETE /api/playlists/:id                          → remove (e do Plex se sincronizado)
-POST /api/playlists/:id/push-to-plex               → cria/re-cria playlist no Plex
-GET  /api/audio/analyze                            → status do batch de análise
+GET  /api/logs                                     → resumo de logs + últimas 200 linhas
+GET  /api/logs/today                               → conteúdo completo do log de hoje
+GET  /api/logs/files                               → lista de arquivos de log
+DELETE /api/logs                                   → zera o log de hoje
+DELETE /api/logs/all                               → remove todos os arquivos de log
 DELETE /api/audio/analysis-cache                   → limpa o cache de análises (409 se batch rodando)
 ```
 

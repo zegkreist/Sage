@@ -8,6 +8,7 @@ import { playlistsRouter } from "./routes/playlists.js";
 import { embeddingsRouter } from "./routes/embeddings.js";
 import { toolsRouter } from "./routes/tools.js";
 import { audioRouter } from "./routes/audio.js";
+import { logsRouter } from "./routes/logs.js";
 import { logger } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +41,8 @@ export function createServer({ libraryScanner, historyService, recommendationEng
   });
 
   healthRouter(router);
-  libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache });
+  logsRouter(router);
+  libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService });
   recommendationsRouter(router, { recommendationEngine });
   playlistsRouter(router, { playlistBuilder, plexService, analysisCache });
   embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });

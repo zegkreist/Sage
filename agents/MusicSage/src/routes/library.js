@@ -1,16 +1,18 @@
 /** GET /api/library/stats
  *  GET /api/library/history  — artistas e faixas mais ouvidas
  *  GET /api/library/metrics  — retrospectiva por período (week|month|year)
+ *  GET /api/library/users    — lista de usuários/contas Plex
  *  GET /api/library/thumb    — proxy de artwork do Plex (evita expor PLEX_TOKEN)
  *  GET /api/library/tracks   — lista resumida de todas as faixas (para autocomplete)
  *  GET /api/library/recently-played — histórico recente com ratingKey
  *  GET /api/library/mood     — mood do período (day|month) calculado via analysisCache
  *  GET /api/library/curiosidades — fatos curiosos sobre a biblioteca
  */
-export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache }) {
+export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService }) {
   router.get("/library/stats", (_req, res) => {
     const stats = libraryScanner.getLibraryStats();
-    res.json(stats);
+    const totalPlaylists = playlistBuilder ? playlistBuilder.list().length : 0;
+    res.json({ ...stats, totalPlaylists });
   });
 
   /**
@@ -54,9 +56,20 @@ export function libraryRouter(router, { libraryScanner, historyService, metricsS
     if (!metricsService) return res.status(503).json({ error: "MetricsService não disponível" });
     const allowed = ["week", "month", "year"];
     const period  = allowed.includes(req.query.period) ? req.query.period : "month";
+    const userId  = req.query.userId ? parseInt(req.query.userId, 10) || null : null;
     try {
-      const data = await metricsService.getMetrics(period);
+      const data = await metricsService.getMetrics(period, userId);
       res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/library/users", async (_req, res) => {
+    if (!plexService) return res.status(503).json({ error: "PlexService não disponível" });
+    try {
+      const users = await plexService.getUsers();
+      res.json({ users });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
