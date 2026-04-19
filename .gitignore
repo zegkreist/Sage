@@ -1,6 +1,9 @@
 # Variáveis de ambiente (contém informações sensíveis)
 .env
 
+# Script de deploy com credenciais hardcoded
+musicsage/build-and-push.sh
+
 # Diretórios de configuração e mídia
 config/
 tv/
