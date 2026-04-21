@@ -1,0 +1,29 @@
+name: jackett-stack
+
+services:
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/Sao_Paulo
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    depends_on:
+      - flaresolverr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+      - AUTO_UPDATE=true
+    volumes:
+      - /media/firstBlood/sage/jackett-config:/config
+    ports:
+      - "9117:9117"
+    restart: unless-stopped

@@ -1,25 +1,12 @@
-version: "3.8"
+version: "3.9"
+  # ── FlareSolverr ─────────────────────────────────────────────────────────
+  # Agora gerenciado em jackett/docker-compose.yml (app separado no ZimaOS).
+  # Mantido aqui apenas como referência; remova se usar o compose separado.
 
-services:
-  plex:
-    image: lscr.io/linuxserver/plex:latest
-    container_name: plex
-    network_mode: host
-    runtime: nvidia
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - TZ=Europe/Lisbon
-      - VERSION=docker
-      - PLEX_CLAIM=${PLEX_CLAIM}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=video,utility
-    volumes:
-      - ./config:/config
-      - ./tv:/tv
-      - ./movies:/movies
-      - ./music:/music
-    restart: unless-stopped
+  # ── Jackett ──────────────────────────────────────────────────────────────
+  # Agora gerenciado em jackett/docker-compose.yml (app separado no ZimaOS).
+  # Acesse :9117 para configurar indexers e pegar a API Key.
+
 
   musicsage:
     build:
@@ -39,6 +26,10 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
       - PLEX_MEDIA_PATH=/media
       - LASTFM_API_KEY=${LASTFM_API_KEY:-}
+      # Jackett roda em app separado (jackett/docker-compose.yml).
+      # Após configurar, cole a API Key abaixo e reinicie o Sage.
+      - JACKETT_URL=${JACKETT_URL:-http://192.168.15.14:9117}
+      - JACKETT_API_KEY=${JACKETT_API_KEY:-}
     volumes:
       - ./musicsage/data:/data
       - ./musicsage-logs:/data/logs
@@ -47,6 +38,9 @@ services:
       - ./movies:/media/movies:ro
       - ./tv:/media/tv:ro
       - musicsage-downloads:/downloads
+      # Config do Jackett montada read-only — Sage lê a API Key automaticamente.
+      # Não precisa definir JACKETT_API_KEY manualmente.
+      - /media/firstBlood/sage/jackett-config:/jackett-config:ro
     network_mode: host
     restart: unless-stopped
 

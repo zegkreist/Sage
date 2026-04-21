@@ -7,130 +7,207 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Jackett category IDs (Torznab standard)
+const JACKETT_CAT = {
+  movie:  [2000],           // Movies
+  series: [5000],           // TV
+  music:  [3000],           // Audio
+};
+
 class TorrentSearch {
   constructor() {
-    // TorrentSearchApi já é uma instância, não uma classe
     this.api = TorrentSearchApi;
     this.initialized = false;
     this.config = this.loadConfig();
+    this._log = (level, msg) => console.log(`[${level.toUpperCase()}] ${msg}`);
+
+    // Jackett — URL via env, API key via env OU lida do ServerConfig.json do Jackett
+    this.jackettUrl    = (process.env.JACKETT_URL || "http://192.168.15.14:9117").replace(/\/$/, "");
+    this.jackettApiKey = process.env.JACKETT_API_KEY || this._readJackettApiKey();
+  }
+
+  setLogger(fn) {
+    this._log = fn;
+  }
+
+  /**
+   * Lê a API key diretamente do ServerConfig.json do Jackett.
+   * Funciona quando o volume ./jackett/config está montado em /jackett-config.
+   */
+  _readJackettApiKey() {
+    const candidates = [
+      "/jackett-config/Jackett/ServerConfig.json",
+      "/ZimaOS-HD/AppData/flaresolverr/config/Jackett/ServerConfig.json",
+      path.join(__dirname, "../../../../jackett/config/Jackett/ServerConfig.json"),
+    ];
+    for (const p of candidates) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
+        const key = cfg.APIKey || cfg.ApiKey || cfg.apiKey || cfg.api_key;
+        if (key) {
+          this._log("info", `Jackett API key lida de: ${p}`);
+          return key;
+        }
+        this._log("warn", `Jackett: arquivo encontrado em ${p} mas sem campo APIKey. Campos: ${Object.keys(cfg).join(", ")}`);
+      } catch (e) {
+        this._log("debug", `Jackett: não conseguiu ler ${p}: ${e.code || e.message}`);
+      }
+    }
+    this._log("warn", "Jackett: API key não encontrada em nenhum caminho candidato");
+    return "";
+  }
+
+  get hasJackett() {
+    // Re-tenta ler a key a cada verificação (Jackett pode ter iniciado depois do Sage)
+    if (!this.jackettApiKey) {
+      this.jackettApiKey = this._readJackettApiKey();
+    }
+    const ok = !!(this.jackettUrl && this.jackettApiKey);
+    if (!ok) {
+      this._log("warn", `Jackett NÃO disponível — url=${this.jackettUrl} key=${this.jackettApiKey ? '(set)' : '(empty)'}`);
+    }
+    return ok;
   }
 
   loadConfig() {
     try {
       const configPath = path.join(__dirname, "../config.json");
-      const configData = fs.readFileSync(configPath, "utf8");
-      return JSON.parse(configData);
-    } catch (error) {
-      console.error("Erro ao carregar config.json:", error.message);
+      return JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch {
       return { search: { providers: [] } };
     }
   }
 
-  async initialize() {
-    if (this.initialized) return;
+  // ── Jackett search ────────────────────────────────────────────────────────
 
-    // Ativar providers do config.json
-    const providers = this.config.search?.providers || [];
+  /**
+   * Busca no Jackett via Torznab aggregate endpoint.
+   * Retorna resultados no mesmo formato que torrent-search-api.
+   */
+  async _jackettSearch(query, type) {
+    const cats = (JACKETT_CAT[type] || []).join(",");
+    const url  = `${this.jackettUrl}/api/v2.0/indexers/all/results`;
+    this._log("info", `Jackett buscando: query="${query}" cats=${cats || "all"}`);
 
-    if (providers.length > 0) {
-      console.log(`🔍 Ativando ${providers.length} providers:`, providers.join(", "));
-
-      for (const providerName of providers) {
-        try {
-          this.api.enableProvider(providerName);
-        } catch (error) {
-          console.warn(`⚠️  Provider ${providerName} não disponível`);
-        }
-      }
-    } else {
-      // Fallback: ativar todos os públicos
-      console.log("🔍 Ativando todos os providers públicos");
-      this.api.enablePublicProviders();
+    let data;
+    try {
+      ({ data } = await axios.get(url, {
+        params: {
+          apikey:   this.jackettApiKey,
+          Query:    query,
+          Category: cats || undefined,
+          _:        Date.now(),
+        },
+        timeout: 55_000,
+      }));
+    } catch (e) {
+      const detail = e.response?.status
+        ? `HTTP ${e.response.status}: ${JSON.stringify(e.response.data)}`
+        : (e.message || e.code || JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      throw new Error(`Jackett request failed: ${detail}`);
     }
 
+    const items = data?.Results ?? [];
+    const indexers = data?.Indexers ?? [];
+    const activeIndexers = indexers.filter(i => i.Results > 0 || i.Status === 0).length;
+    this._log("info", `Jackett retornou ${items.length} resultados para "${query}" (${indexers.length} indexers, ${activeIndexers} com resultado)`);
+    return items.map(r => ({
+      title:    r.Title    || "",
+      size:     r.Size     ? this._bytesToHuman(r.Size) : "–",
+      seeds:    r.Seeders  ?? 0,
+      peers:    r.Peers    ?? 0,
+      provider: r.Tracker  || "Jackett",
+      magnet:   r.MagnetUri || null,
+      link:     r.Link      || null,
+    }));
+  }
+
+  _bytesToHuman(bytes) {
+    if (!bytes) return "–";
+    if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+    if (bytes >= 1_048_576)     return `${(bytes / 1_048_576).toFixed(2)} MB`;
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  }
+
+  // ── Fallback scraper ──────────────────────────────────────────────────────
+
+  async initialize() {
+    if (this.initialized) return;
+    const providers = this.config.search?.providers || [];
+    if (providers.length > 0) {
+      for (const p of providers) {
+        try { this.api.enableProvider(p); } catch { /* provider indisponível */ }
+      }
+    } else {
+      this.api.enablePublicProviders();
+    }
     this.initialized = true;
   }
 
-  /**
-   * Busca torrents para filmes
-   */
+  async _scraperSearch(query, category, limit = 20) {
+    await this.initialize();
+    const torrents = await this.api.search(query, category, limit);
+    return torrents.map(r => ({
+      title:    r.title    || "",
+      size:     r.size     || "–",
+      seeds:    typeof r.seeds === "number" ? r.seeds : 0,
+      peers:    typeof r.peers === "number" ? r.peers : 0,
+      provider: r.provider || "–",
+      magnet:   r.magnet   || null,
+      link:     r.link     || null,
+    }));
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
   async searchMovies(movieName, year = null) {
-    await this.initialize();
-
     const query = year ? `${movieName} ${year}` : movieName;
-    const torrents = await this.api.search(query, "Movies", 20);
-
-    // Ordenar por seeders
-    return this.rankResults(torrents, "movie");
+    const useJackett = this.hasJackett;
+    this._log("info", `searchMovies via ${useJackett ? 'Jackett' : 'scraper'}: "${query}"`);
+    const raw = useJackett
+      ? await this._jackettSearch(query, "movie")
+      : await this._scraperSearch(query, "Movies");
+    this._log("info", `searchMovies: ${raw.length} resultados brutos`);
+    return this.rankResults(raw, "movie");
   }
 
-  /**
-   * Busca torrents para séries
-   */
   async searchSeries(seriesName, season = null, episode = null) {
-    await this.initialize();
-
     let query = seriesName;
-    if (season && episode) {
-      query += ` S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
-    } else if (season) {
-      query += ` S${String(season).padStart(2, "0")}`;
-    }
-
-    const torrents = await this.api.search(query, "All", 20);
-    return this.rankResults(torrents, "series");
+    if (season && episode) query += ` S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
+    else if (season)       query += ` S${String(season).padStart(2,"0")}`;
+    const useJackett = this.hasJackett;
+    this._log("info", `searchSeries via ${useJackett ? 'Jackett' : 'scraper'}: "${query}"`);
+    const raw = useJackett
+      ? await this._jackettSearch(query, "series")
+      : await this._scraperSearch(query, "All");
+    this._log("info", `searchSeries: ${raw.length} resultados brutos`);
+    return this.rankResults(raw, "series");
   }
 
-  /**
-   * Busca torrents para música
-   */
   async searchMusic(artist, album = null) {
-    await this.initialize();
-
     const query = album ? `${artist} ${album}` : artist;
-    const torrents = await this.api.search(query, "Audio", 20);
-
-    return this.rankResults(torrents, "music");
+    const useJackett = this.hasJackett;
+    this._log("info", `searchMusic via ${useJackett ? 'Jackett' : 'scraper'}: "${query}"`);
+    const raw = useJackett
+      ? await this._jackettSearch(query, "music")
+      : await this._scraperSearch(query, "Audio");
+    this._log("info", `searchMusic: ${raw.length} resultados brutos`);
+    return this.rankResults(raw, "music");
   }
 
-  /**
-   * Busca genérica
-   */
   async search(query, category = "All", limit = 10) {
     await this.initialize();
-
-    const torrents = await this.api.search(query, category, limit);
-    return torrents;
+    return this.api.search(query, category, limit);
   }
 
-  /**
-   * Obtém o magnet link de um torrent
-   */
   async getMagnetLink(torrent) {
     await this.initialize();
-
-    try {
-      const magnetLink = await this.api.getMagnet(torrent);
-      return magnetLink;
-    } catch (error) {
-      console.error("Erro ao obter magnet link:", error.message);
-      return null;
-    }
+    try { return await this.api.getMagnet(torrent); } catch { return null; }
   }
 
-  /**
-   * Baixa o arquivo .torrent como Buffer (fallback quando não há magnet)
-   */
   async getTorrentBuffer(torrent) {
     await this.initialize();
-
-    try {
-      const buffer = await this.api.downloadTorrent(torrent);
-      return buffer;
-    } catch (error) {
-      console.error("Erro ao baixar arquivo .torrent:", error.message);
-      return null;
-    }
+    try { return await this.api.downloadTorrent(torrent); } catch { return null; }
   }
 
   /**

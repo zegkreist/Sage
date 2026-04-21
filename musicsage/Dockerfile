@@ -29,20 +29,14 @@ RUN npm run build
 # ─── Stage 2 — Instala deps Node dos agents ──────────────────────────────────
 FROM node:20-alpine AS agents-builder
 
-# Copia todo o source primeiro — necessário para que Stormbringer possa
-# referenciar Transporter como file: dep local durante o npm install.
+# AllFather e Transporter primeiro (mudam raramente)
 COPY agents/AllFather/   /agents/AllFather/
-COPY agents/Stormbringer/ /agents/Stormbringer/
-COPY agents/Transporter/  /agents/Transporter/
-
-# AllFather — sem deps locais
+COPY agents/Transporter/ /agents/Transporter/
 RUN cd /agents/AllFather && npm install --omit=dev
-
-# Transporter — sem deps locais
 RUN cd /agents/Transporter && npm install --omit=dev
 
-# Stormbringer — depende de @plex-agents/transporter como pacote local.
-# O package.json usa "*" (sem file:), então patchamos para file: antes do install.
+# Stormbringer por último (muda com frequência)
+COPY agents/Stormbringer/ /agents/Stormbringer/
 RUN cd /agents/Stormbringer && \
     node -e " \
       const fs = require('fs'); \
@@ -56,7 +50,7 @@ RUN cd /agents/Stormbringer && \
 # ─── Stage 3 — Production server ─────────────────────────────────────────────
 FROM node:20-alpine AS prod
 
-# Sistema: ffmpeg, bash, Python com dependências de compilação para streamrip
+# 1. Sistema: ffmpeg, bash, Python (lento, estável)
 RUN apk add --no-cache \
         ffmpeg \
         bash \
@@ -75,41 +69,35 @@ RUN apk add --no-cache \
     && apk del gcc musl-dev python3-dev libffi-dev openssl-dev cargo rust \
     && rm -rf /root/.cache/pip /root/.cargo
 
-# ── Agents já com deps instaladas ────────────────────────────────────────────
-COPY --from=agents-builder /agents/AllFather    /agents/AllFather
-COPY --from=agents-builder /agents/Stormbringer /agents/Stormbringer
-COPY --from=agents-builder /agents/Transporter  /agents/Transporter
-
-# TideCaller: scripts Python, setup e config
-COPY agents/TideCaller/scripts  /agents/TideCaller/scripts
-COPY agents/TideCaller/setup    /agents/TideCaller/setup
-COPY agents/TideCaller/config   /agents/TideCaller/config
-# Cria o venv do TideCaller e instala dependências nele.
-# Isso garante que TC_PYTHON (.venv_tidal/bin/python3) exista no container.
+# 2. Venv do TideCaller (lento, estável — não depende de nenhum source copiado)
 RUN python3 -m venv /agents/TideCaller/.venv_tidal \
     && /agents/TideCaller/.venv_tidal/bin/pip install --no-cache-dir tidalapi streamrip
 # Patch: lyrics 401 não deve abortar o download (streamrip issue #959).
-# A versão do PyPI só captura TypeError; alargamos para Exception.
 RUN sed -i 's/except TypeError as e:/except Exception as e:/' \
     /agents/TideCaller/.venv_tidal/lib/python3.*/site-packages/streamrip/client/tidal.py
-# Atenção: o token OAuth do Tidal fica em /agents/TideCaller/config/.config
-# Monte um volume ou passe via env para persistência: -v tidal-config:/agents/TideCaller/config
 
-# ── MusicSage ────────────────────────────────────────────────────────────────
+# 3. Agents estáveis (mudam raramente)
+COPY --from=agents-builder /agents/AllFather    /agents/AllFather
+COPY --from=agents-builder /agents/Transporter  /agents/Transporter
+
+# 4. MusicSage deps Node (só re-roda quando package.json mudar)
 WORKDIR /app
-
-# AllFather precisa estar resolvível como file: dep. Cria link simbólico
-# para /agents/AllFather que o npm já resolveu no stage anterior.
 COPY musicsage/package*.json ./
-# Injeta AllFather no node_modules diretamente (evita file: dep quebrada)
 RUN npm install --omit=dev && \
     rm -rf node_modules/@plex-agents/allfather && \
     ln -s /agents/AllFather node_modules/@plex-agents/allfather
 
+# 5. MusicSage source + frontend compilado
 COPY musicsage/ .
-
-# Build do frontend já compilado
 COPY --from=frontend-builder /build/frontend/dist ./public
+
+# 6. Agents que mudam com frequência (Stormbringer, TideCaller scripts)
+COPY --from=agents-builder /agents/Stormbringer /agents/Stormbringer
+COPY agents/TideCaller/scripts  /agents/TideCaller/scripts
+COPY agents/TideCaller/setup    /agents/TideCaller/setup
+COPY agents/TideCaller/config   /agents/TideCaller/config
+# Atenção: o token OAuth do Tidal fica em /agents/TideCaller/config/.config
+# Monte um volume ou passe via env para persistência: -v tidal-config:/agents/TideCaller/config
 
 # ── Aponta downloads do Stormbringer para o volume /downloads ─────────────────
 # Remove o diretório downloads/ copiado (está vazio ou tem subpastas vazias)

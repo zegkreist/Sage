@@ -54,6 +54,7 @@ async function getTorrentSearch() {
   if (!_torrentSearch) {
     const mod = await import("../../../agents/Stormbringer/src/torrentSearch.js");
     _torrentSearch = mod.default;
+    _torrentSearch.setLogger((level, msg) => logger[level]("STORMBRINGER", msg));
   }
   return _torrentSearch;
 }
@@ -144,6 +145,18 @@ function spawnDetached(cmd, args, cwd, opts = {}) {
   });
 }
 
+const SEARCH_TIMEOUT_MS = 60_000;
+
+/** Wraps a search promise with a timeout to prevent the route hanging forever. */
+function withSearchTimeout(promise) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Tempo esgotado: nenhum provider de torrent respondeu. Verifique conectividade ou configure Jackett (JACKETT_URL).")), SEARCH_TIMEOUT_MS)
+    ),
+  ]);
+}
+
 export function toolsRouter(router) {
   // ── POST /api/tools/stormbringer/search ──────────────────────────────────
   router.post("/tools/stormbringer/search", async (req, res) => {
@@ -153,7 +166,7 @@ export function toolsRouter(router) {
     try {
       logger.info("SERVER", `Stormbringer search music: "${artist}" / "${album || ""}"`);
       const ts = await getTorrentSearch();
-      const results = await ts.searchMusic(artist.trim(), album?.trim() || null);
+      const results = await withSearchTimeout(ts.searchMusic(artist.trim(), album?.trim() || null));
 
       res.json(
         results.slice(0, 15).map((r) => ({
@@ -167,8 +180,9 @@ export function toolsRouter(router) {
         }))
       );
     } catch (err) {
-      logger.error("SERVER", `Stormbringer search error: ${err.message}`);
-      res.status(500).json({ error: err.message });
+      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
+      logger.error("SERVER", `Stormbringer search error: ${JSON.stringify(detail)}`);
+      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
     }
   });
 
@@ -180,7 +194,7 @@ export function toolsRouter(router) {
     try {
       logger.info("SERVER", `Stormbringer search movie: "${title}" ${year || ""}`);
       const ts = await getTorrentSearch();
-      const results = await ts.searchMovies(title.trim(), year ? parseInt(year) : null);
+      const results = await withSearchTimeout(ts.searchMovies(title.trim(), year ? parseInt(year) : null));
       res.json(
         results.slice(0, 15).map((r) => ({
           title:    r.title    || "",
@@ -193,8 +207,9 @@ export function toolsRouter(router) {
         }))
       );
     } catch (err) {
-      logger.error("SERVER", `Stormbringer movie search error: ${err.message}`);
-      res.status(500).json({ error: err.message });
+      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
+      logger.error("SERVER", `Stormbringer movie search error: ${JSON.stringify(detail)}`);
+      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
     }
   });
 
@@ -208,7 +223,7 @@ export function toolsRouter(router) {
       const e = episode ? parseInt(episode) : null;
       logger.info("SERVER", `Stormbringer search series: "${title}" S${s ?? '?'}E${e ?? '?'}`);
       const ts = await getTorrentSearch();
-      const results = await ts.searchSeries(title.trim(), s, e);
+      const results = await withSearchTimeout(ts.searchSeries(title.trim(), s, e));
       res.json(
         results.slice(0, 15).map((r) => ({
           title:    r.title    || "",
@@ -221,8 +236,9 @@ export function toolsRouter(router) {
         }))
       );
     } catch (err) {
-      logger.error("SERVER", `Stormbringer series search error: ${err.message}`);
-      res.status(500).json({ error: err.message });
+      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
+      logger.error("SERVER", `Stormbringer series search error: ${JSON.stringify(detail)}`);
+      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
     }
   });
 
