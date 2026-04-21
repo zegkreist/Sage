@@ -71,8 +71,13 @@ const embeddingService  = new EmbeddingService({
 
 const playlistBuilder = new PlaylistBuilder({ allfather, libraryScanner, embeddingService });
 
-// Carrega cache de análises salvas anteriormente
-analysisCache.load().catch(err => logger.warn("ANALYSIS_CACHE", `Falha ao carregar: ${err.message}`));
+// Carrega cache de análises salvas anteriormente — await garante que o cache
+// está disponível antes do primeiro request chegar ao servidor
+try {
+  await analysisCache.load();
+} catch (err) {
+  logger.warn("ANALYSIS_CACHE", `Falha ao carregar cache: ${err.message}`);
+}
 
 // ── Inicializa e faz scan inicial da biblioteca ───────────────────────────
 
@@ -109,3 +114,22 @@ server.on("listening", () => {
   logger.info("SERVER", `✅ MusicSage rodando em http://localhost:${PORT}`);
   logger.info("SERVER", "Endpoints: /api/health | /api/library/stats | /api/recommendations | /api/playlists");
 });
+
+// ── Shutdown graceful (SIGTERM do Docker / SIGINT do Ctrl+C) ─────────────
+// Docker envia SIGTERM e aguarda até 10 s antes do SIGKILL.
+// Garantimos flush do cache antes de sair.
+async function gracefulShutdown(signal) {
+  logger.info("SERVER", `${signal} recebido — encerrando com flush do cache...`);
+  try {
+    await analysisCache.flush();
+    logger.info("SERVER", "Cache salvo com sucesso.");
+  } catch (err) {
+    logger.warn("SERVER", `Falha ao salvar cache no shutdown: ${err.message}`);
+  }
+  server.close(() => process.exit(0));
+  // Força saída após 8 s caso o servidor demore a fechar (antes do SIGKILL em 10 s)
+  setTimeout(() => process.exit(0), 8_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));

@@ -166,7 +166,10 @@
     tcDownloading = true;
     try {
       const albums = tcAlbums.filter(a => tcSelectedAlbums.has(a.id)).map(a => ({ id: a.id, name: a.title ?? a.name }));
-      await api('POST', '/tools/tidecaller/artist/download-albums', { albums });
+      await api('POST', '/tools/tidecaller/artist/download-albums', {
+        albums,
+        artistName: tcSelectedArtist?.name ?? null,
+      });
       toast.success(`${albums.length} álbum(ns) enfileirado(s) para download`);
       tcSelectedAlbums = new Set();
       await loadDownloads();
@@ -201,17 +204,48 @@
 
   // ─── Status helpers ──────────────────────────────────────
   function torrentPct(t) {
-    // DownloadManager stores progress as 0-100 (already multiplied)
     if (t.progress != null) return Math.min(100, Math.round(t.progress));
     if (t.total && t.downloaded) return Math.round((t.downloaded / t.total) * 100);
     return 0;
   }
 
-  function torrentStatusClass(t) {
+  function torrentStatusColor(t) {
     const s = (t.status ?? '').toLowerCase();
-    if (s.includes('done') || s.includes('seeding') || t.progress >= 100) return 'text-emerald-400';
-    if (s.includes('error') || s.includes('fail')) return 'text-red-400';
-    return 'text-accent';
+    if (s.includes('done') || s.includes('seeding') || t.progress >= 100) return '#1db954';
+    if (s.includes('error') || s.includes('fail')) return '#f87171';
+    return '#9d8eff';
+  }
+
+  function tcJobProgress(job) {
+    const total = job.albums?.length ?? 0;
+    const done  = job.albums?.filter(a => a.status === 'done').length  ?? 0;
+    const error = job.albums?.filter(a => a.status === 'error').length ?? 0;
+    return { total, done, error, pending: total - done - error };
+  }
+
+  function tcJobStatusColor(job) {
+    if (job.status === 'done')    return '#1db954';
+    if (job.status === 'error')   return '#f87171';
+    return '#9d8eff'; // running
+  }
+
+  function elapsedSince(iso) {
+    if (!iso) return '';
+    const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (secs < 60)  return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m${secs%60}s`;
+    return `${Math.floor(secs/3600)}h${Math.floor((secs%3600)/60)}m`;
+  }
+
+  function albumStatusIcon(status) {
+    if (status === 'done')  return '✓';
+    if (status === 'error') return '✗';
+    return '…';
+  }
+  function albumStatusColor(status) {
+    if (status === 'done')  return '#1db954';
+    if (status === 'error') return '#f87171';
+    return '#5a5a78';
   }
 </script>
 
@@ -225,33 +259,92 @@
 
   <!-- Active downloads widget -->
   {#if sbDownloads.length > 0 || tcDownloads.length > 0}
-    <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1e1e2e">
-      <div class="text-2xs font-semibold uppercase tracking-wider mb-3" style="color:#5a5a78">Downloads Ativos</div>
-      <div class="space-y-2.5">
-        {#each sbDownloads.slice(0,5) as t}
-          <div class="flex items-center gap-3">
-            <div class="flex-1 min-w-0">
-              <div class="text-xs text-white truncate">{t.name ?? t.title}</div>
-              <div class="progress-bar mt-1.5">
-                <div class="progress-fill" style="width:{torrentPct(t)}%"></div>
+    <div class="rounded-2xl border p-4 space-y-3" style="background:#111118;border-color:#1e1e2e">
+      <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Downloads Ativos</div>
+
+      <!-- Stormbringer torrents -->
+      {#each sbDownloads.slice(0,5) as t}
+        {@const pct = torrentPct(t)}
+        {@const color = torrentStatusColor(t)}
+        <div class="flex items-center gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="text-xs text-white truncate">{t.name ?? t.title}</span>
+              <span class="text-2xs font-semibold shrink-0" style="color:{color}">{pct}%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width:{pct}%;background:{color}"></div>
+            </div>
+            <div class="flex gap-3 mt-1">
+              <span class="text-2xs" style="color:#5a5a78">
+                {#if t.downloadSpeed && pct < 100}{fmtBytes(t.downloadSpeed)}/s{/if}
+              </span>
+              <span class="text-2xs" style="color:{color}">
+                {pct >= 100 ? 'Concluído' : (t.status ?? 'Baixando')}
+              </span>
+            </div>
+          </div>
+          <Button size="xs" variant="danger" onclick={() => sbRemove(t.infoHash)}>✕</Button>
+        </div>
+      {/each}
+
+      <!-- TideCaller jobs -->
+      {#each tcDownloads as job}
+        {@const prog = tcJobProgress(job)}
+        {@const pct  = prog.total > 0 ? Math.round((prog.done + prog.error) / prog.total * 100) : 0}
+        {@const statusColor = tcJobStatusColor(job)}
+        <div class="rounded-xl border p-3 space-y-2" style="background:#0d0d18;border-color:#1a1a28">
+          <!-- Job header -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm">🌊</span>
+              <span class="text-xs font-medium text-white truncate">
+                {job.artistName ?? 'TideCaller'}
+              </span>
+              <!-- status badge -->
+              {#if job.status === 'running'}
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(157,142,255,0.12);color:#9d8eff">baixando</span>
+              {:else if job.status === 'done'}
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(29,185,84,0.12);color:#1db954">✓ concluído</span>
+              {:else}
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(248,113,113,0.12);color:#f87171">✗ erro</span>
+              {/if}
+            </div>
+            <span class="text-2xs shrink-0" style="color:#5a5a78">
+              {#if job.status === 'running'}{elapsedSince(job.startedAt)}{/if}
+              {#if job.finishedAt && job.status !== 'running'}{elapsedSince(job.startedAt)} total{/if}
+            </span>
+          </div>
+
+          <!-- Progress bar -->
+          {#if prog.total > 0}
+            <div>
+              <div class="flex justify-between text-2xs mb-1" style="color:#5a5a78">
+                <span>{prog.done} de {prog.total} álbuns{prog.error > 0 ? ` · ${prog.error} erro(s)` : ''}</span>
+                <span style="color:{statusColor}">{pct}%</span>
+              </div>
+              <div class="h-1.5 rounded-full" style="background:#1a1a28">
+                <div class="h-1.5 rounded-full transition-all" style="width:{pct}%;background:{statusColor}"></div>
               </div>
             </div>
-            <span class="text-2xs stat-value shrink-0 {torrentPct(t) >= 100 ? '' : ''}"
-                  style="color:{torrentPct(t) >= 100 ? '#1db954' : '#9d8eff'}">{torrentPct(t)}%</span>
-            {#if t.downloadSpeed}
-              <span class="text-2xs shrink-0" style="color:#5a5a78">{fmtBytes(t.downloadSpeed)}/s</span>
-            {/if}
-            <Button size="xs" variant="danger" onclick={() => sbRemove(t.infoHash)}>✕</Button>
+          {/if}
+
+          <!-- Per-album list -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 max-h-28 overflow-y-auto">
+            {#each job.albums as a}
+              <div class="flex items-center gap-1.5 text-2xs">
+                <span style="color:{albumStatusColor(a.status)};font-size:10px">{albumStatusIcon(a.status)}</span>
+                <span class="truncate" style="color:{a.status === 'done' ? '#c0c0d0' : a.status === 'error' ? '#f87171' : '#5a5a78'}">{a.name}</span>
+              </div>
+            {/each}
           </div>
-        {/each}
-        {#each tcDownloads.filter(j => j.status === 'running').slice(0,3) as j}
-          <div class="flex items-center gap-2">
-            <Spinner size="xs" />
-            <span class="text-xs text-white truncate">Tidal: {j.albums?.length ?? 0} álbuns</span>
-            <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:#38bdf8">Tidal</span>
-          </div>
-        {/each}
-      </div>
+
+          <!-- Error message -->
+          {#if job.lastError}
+            <div class="text-2xs rounded px-2 py-1 break-all" style="background:rgba(248,113,113,0.07);color:#f87171">{job.lastError}</div>
+          {/if}
+        </div>
+      {/each}
     </div>
   {/if}
 

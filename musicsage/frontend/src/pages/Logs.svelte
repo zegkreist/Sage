@@ -4,15 +4,17 @@
   import { toast } from '$lib/stores/toast.js';
   import Spinner from '../components/ui/Spinner.svelte';
 
-  let summary     = $state(null);
-  let lines       = $state([]);
-  let files       = $state([]);
-  let loading     = $state(true);
+  let files        = $state([]);
+  let lines        = $state([]);
+  let selectedFile = $state(null);   // null = hoje
+  let loading      = $state(true);
   let loadingLines = $state(false);
-  let autoRefresh = $state(false);
-  let filterText  = $state('');
-  let filterLevel = $state('');      // INFO | WARN | ERROR | DEBUG | ''
-  let refreshId   = null;
+  let autoRefresh  = $state(false);
+  let filterText   = $state('');
+  let filterLevel  = $state('');     // INFO | WARN | ERROR | DEBUG | ''
+  let refreshId    = null;
+  let logEl        = $state(null);   // bind:this para o container de scroll
+  let autoScroll   = $state(true);
 
   const LEVEL_COLOR = {
     INFO:  'color:#1db954',
@@ -27,16 +29,20 @@
     return () => { if (refreshId) clearInterval(refreshId); };
   });
 
+  function todayName() {
+    return `musicsage-${new Date().toISOString().slice(0, 10)}.log`;
+  }
+
   async function loadAll() {
     loading = true;
     try {
-      const [s, t] = await Promise.all([
-        api('GET', '/logs'),
+      const [filesRes, linesRes] = await Promise.all([
+        api('GET', '/logs/files'),
         api('GET', '/logs/today'),
       ]);
-      summary = s;
-      files   = s.files ?? [];
-      lines   = t.lines ?? [];
+      files        = filesRes.files ?? [];
+      lines        = linesRes.lines ?? [];
+      selectedFile = null;
     } catch (e) {
       toast.error(`Logs: ${e.message}`);
     } finally {
@@ -44,11 +50,37 @@
     }
   }
 
+  async function loadFile(name) {
+    loadingLines = true;
+    try {
+      if (!name) {
+        const t  = await api('GET', '/logs/today');
+        lines    = t.lines ?? [];
+        selectedFile = null;
+      } else {
+        const t  = await api('GET', `/logs/file/${encodeURIComponent(name)}`);
+        lines    = t.lines ?? [];
+        selectedFile = name;
+      }
+      scrollToBottom();
+    } catch (e) {
+      toast.error(`Erro ao carregar ${name ?? 'hoje'}: ${e.message}`);
+    } finally {
+      loadingLines = false;
+    }
+  }
+
   async function refreshLines() {
     loadingLines = true;
     try {
-      const t = await api('GET', '/logs/today');
-      lines = t.lines ?? [];
+      if (!selectedFile) {
+        const t = await api('GET', '/logs/today');
+        lines   = t.lines ?? [];
+      } else {
+        const t = await api('GET', `/logs/file/${encodeURIComponent(selectedFile)}`);
+        lines   = t.lines ?? [];
+      }
+      if (autoScroll) scrollToBottom();
     } catch { /* silent */ }
     finally { loadingLines = false; }
   }
@@ -63,12 +95,16 @@
     }
   }
 
+  function scrollToBottom() {
+    if (logEl) setTimeout(() => { logEl.scrollTop = logEl.scrollHeight; }, 0);
+  }
+
   async function clearToday() {
     if (!confirm('Zerar o log de hoje?')) return;
     try {
       await api('DELETE', '/logs');
       toast.success('Log de hoje zerado');
-      lines = [];
+      if (!selectedFile) lines = [];
     } catch (e) { toast.error(e.message); }
   }
 
@@ -77,17 +113,18 @@
     try {
       const res = await api('DELETE', '/logs/all');
       toast.success(res.message ?? 'Todos os logs removidos');
-      lines = [];
-      files = [];
+      lines = []; files = []; selectedFile = null;
     } catch (e) { toast.error(e.message); }
   }
 
-  // ── Filtro ───────────────────────────────────────────────
   let filteredLines = $derived(lines.filter(l => {
     if (filterLevel && !l.includes(`[${filterLevel}`)) return false;
     if (filterText  && !l.toLowerCase().includes(filterText.toLowerCase())) return false;
     return true;
   }));
+
+  let errorCount = $derived(lines.filter(l => l.includes('[ERROR')).length);
+  let warnCount  = $derived(lines.filter(l => l.includes('[WARN' )).length);
 
   function levelFromLine(line) {
     const m = line.match(/\[(INFO|WARN|ERROR|DEBUG|HTTP)\b/);
@@ -99,6 +136,16 @@
     if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
     return `${(b / 1024 / 1024).toFixed(2)} MB`;
   }
+
+  function fileLabel(f) {
+    const m = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : f.name;
+  }
+
+  function isSelected(f) {
+    if (!f) return selectedFile === null;
+    return selectedFile === f.name;
+  }
 </script>
 
 <div class="p-6 w-full min-h-full animate-fade-in flex flex-col gap-5">
@@ -107,7 +154,9 @@
   <div class="flex items-end justify-between gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl font-extrabold text-white tracking-tight">Logs</h1>
-      <p class="text-sm mt-0.5" style="color:#5a5a78">Monitoramento e controle dos logs do servidor</p>
+      <p class="text-sm mt-0.5" style="color:#5a5a78">
+        {selectedFile ? selectedFile : 'Hoje — ' + todayName()}
+      </p>
     </div>
     <div class="flex gap-2 flex-wrap">
       <button
@@ -124,6 +173,14 @@
         onclick={toggleAutoRefresh}
         title="Auto-refresh a cada 3s"
       >{autoRefresh ? '⏸ Auto ON' : '▶ Auto OFF'}</button>
+      <button
+        class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+        style={autoScroll
+          ? 'background:rgba(29,185,84,0.08);color:#1db954;border:1px solid rgba(29,185,84,0.2)'
+          : 'background:#111118;color:#5a5a78;border:1px solid #1e1e2e'}
+        onclick={() => { autoScroll = !autoScroll; if (autoScroll) scrollToBottom(); }}
+        title="Rolar para o final automaticamente"
+      >⬇ Scroll</button>
       <button
         class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
         style="background:rgba(245,158,11,0.1);color:#f59e0b;border:1px solid rgba(245,158,11,0.2)"
@@ -150,16 +207,16 @@
         <div class="text-xl font-bold text-white">{files.length}</div>
       </div>
       <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
-        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Linhas hoje</div>
+        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Linhas</div>
         <div class="text-xl font-bold text-white">{lines.length}</div>
       </div>
       <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
-        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Erros hoje</div>
-        <div class="text-xl font-bold" style="color:#f87171">{lines.filter(l => l.includes('[ERROR')).length}</div>
+        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Erros</div>
+        <div class="text-xl font-bold" style="color:#f87171">{errorCount}</div>
       </div>
       <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
-        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Avisos hoje</div>
-        <div class="text-xl font-bold" style="color:#f59e0b">{lines.filter(l => l.includes('[WARN')).length}</div>
+        <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Avisos</div>
+        <div class="text-xl font-bold" style="color:#f59e0b">{warnCount}</div>
       </div>
     </div>
 
@@ -188,20 +245,26 @@
       {/if}
     </div>
 
-    <div class="grid grid-cols-1 xl:grid-cols-4 gap-5 flex-1 min-h-0">
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-5" style="min-height:0">
 
       <!-- Log viewer -->
-      <div class="xl:col-span-3 rounded-2xl border overflow-hidden flex flex-col" style="background:#080810;border-color:#1a1a28">
-        <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color:#1a1a28">
-          <div class="text-sm font-semibold text-white">Log de Hoje</div>
+      <div class="xl:col-span-3 rounded-2xl border flex flex-col" style="background:#080810;border-color:#1a1a28;height:600px">
+        <div class="flex items-center justify-between px-4 py-3 border-b shrink-0" style="border-color:#1a1a28">
+          <div class="text-sm font-semibold text-white">
+            {selectedFile ?? 'Hoje'}
+          </div>
           <span class="text-2xs" style="color:#5a5a78">
             {filteredLines.length} de {lines.length} linhas
           </span>
         </div>
-        <div class="overflow-y-auto flex-1 font-mono text-2xs leading-5 p-3">
+        <div
+          bind:this={logEl}
+          class="overflow-y-auto font-mono text-2xs leading-5 p-3"
+          style="flex:1;min-height:0"
+        >
           {#if filteredLines.length === 0}
             <div class="py-8 text-center" style="color:#5a5a78">
-              {lines.length === 0 ? 'Nenhum log hoje.' : 'Nenhuma linha corresponde ao filtro.'}
+              {lines.length === 0 ? 'Nenhum log neste arquivo.' : 'Nenhuma linha corresponde ao filtro.'}
             </div>
           {:else}
             {#each filteredLines as line}
@@ -216,19 +279,35 @@
       </div>
 
       <!-- File list -->
-      <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1a1a28">
-        <div class="px-4 py-3 border-b" style="border-color:#1a1a28">
+      <div class="rounded-2xl border flex flex-col" style="background:#111118;border-color:#1a1a28;height:600px">
+        <div class="px-4 py-3 border-b shrink-0" style="border-color:#1a1a28">
           <div class="text-sm font-semibold text-white">Arquivos de Log</div>
         </div>
-        <div class="divide-y" style="border-color:#1a1a28">
+        <div class="overflow-y-auto flex-1 divide-y" style="border-color:#1a1a28;min-height:0">
+          <button
+            class="w-full text-left px-4 py-3 transition-colors hover:bg-white/5"
+            style={isSelected(null)
+              ? 'background:rgba(124,106,245,0.12);border-left:2px solid #7c6af5'
+              : 'border-left:2px solid transparent'}
+            onclick={() => loadFile(null)}
+          >
+            <div class="text-xs font-semibold" style={isSelected(null) ? 'color:#9d8eff' : 'color:#e0e0e8'}>Hoje</div>
+            <div class="text-2xs mt-0.5" style="color:#5a5a78">{todayName()}</div>
+          </button>
           {#if files.length === 0}
             <div class="px-4 py-6 text-center text-xs" style="color:#5a5a78">Nenhum arquivo</div>
           {:else}
             {#each files as f}
-              <div class="px-4 py-3">
-                <div class="text-xs text-white truncate font-medium">{f.name}</div>
+              <button
+                class="w-full text-left px-4 py-3 transition-colors hover:bg-white/5"
+                style={isSelected(f)
+                  ? 'background:rgba(124,106,245,0.1);border-left:2px solid #7c6af5'
+                  : 'border-left:2px solid transparent'}
+                onclick={() => loadFile(f.name)}
+              >
+                <div class="text-xs font-medium" style={isSelected(f) ? 'color:#9d8eff' : 'color:#c0c0d0'}>{fileLabel(f)}</div>
                 <div class="text-2xs mt-0.5" style="color:#5a5a78">{fmtBytes(f.size)}</div>
-              </div>
+              </button>
             {/each}
           {/if}
         </div>

@@ -24,7 +24,7 @@
  * }
  */
 
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, copyFile, rename, mkdir } from "fs/promises";
 import { existsSync }                  from "fs";
 import { join, dirname }               from "path";
 import { fileURLToPath }               from "url";
@@ -33,16 +33,18 @@ import { logger }                       from "../logger.js";
 const __dirname   = dirname(fileURLToPath(import.meta.url));
 const _DATA_DIR  = process.env.DATA_DIR || join(__dirname, "../../data");
 const CACHE_FILE  = join(_DATA_DIR, "analysis-cache.json");
+const BACKUP_FILE = CACHE_FILE + ".bak";
 const CACHE_DIR   = dirname(CACHE_FILE);
 const CACHE_VERSION = 1;
 
 export class AnalysisCacheService {
   constructor() {
     /** @type {Map<string, object>} ratingKey → { ratingKey, title, artist, album, filePath, analysis, analyzedAt } */
-    this._cache   = new Map();
-    this._dirty   = false;
-    this._writing = false;
-    this._loaded  = false;
+    this._cache        = new Map();
+    this._dirty        = false;
+    this._writing      = false;
+    this._loaded       = false;
+    this._writePromise = null; // Promise da escrita em curso (para flush no shutdown)
   }
 
   // ─── API pública ──────────────────────────────────────────────────────────
@@ -50,22 +52,32 @@ export class AnalysisCacheService {
   /** Carrega o cache do disco. Deve ser chamado 1x antes de usar. */
   async load() {
     if (this._loaded) return;
-    try {
-      if (!existsSync(CACHE_FILE)) {
-        this._loaded = true;
-        return;
-      }
-      const raw  = await readFile(CACHE_FILE, "utf-8");
-      const data = JSON.parse(raw);
-      if (data?.tracks && typeof data.tracks === "object") {
+
+    // Tenta carregar o arquivo principal; se falhar, tenta o backup.
+    const candidates = [
+      { path: CACHE_FILE,  label: "principal" },
+      { path: BACKUP_FILE, label: "backup"    },
+    ];
+
+    for (const { path: filePath, label } of candidates) {
+      if (!existsSync(filePath)) continue;
+      try {
+        const raw  = await readFile(filePath, "utf-8");
+        const data = JSON.parse(raw);
+        if (!data?.tracks || typeof data.tracks !== "object") {
+          throw new Error("formato inválido");
+        }
         for (const [key, value] of Object.entries(data.tracks)) {
           this._cache.set(String(key), value);
         }
+        logger.info("ANALYSIS_CACHE", `Carregado (${label}) — ${this._cache.size} faixas analisadas`);
+        break; // sucesso — não precisa tentar o backup
+      } catch (err) {
+        logger.warn("ANALYSIS_CACHE", `Falha ao ler arquivo ${label} (${filePath}): ${err.message}`);
+        // tenta próximo candidato
       }
-      logger.info("ANALYSIS_CACHE", `Carregado — ${this._cache.size} faixas analisadas`);
-    } catch (err) {
-      logger.warn("ANALYSIS_CACHE", `Falha ao carregar cache: ${err.message}`);
     }
+
     this._loaded = true;
   }
 
@@ -164,8 +176,18 @@ export class AnalysisCacheService {
     };
   }
 
-  /** Força escrita imediata ao disco. */
+  /**
+   * Força escrita imediata ao disco.
+   * Seguro para uso em shutdown: aguarda qualquer escrita em curso antes de prosseguir.
+   */
   async flush() {
+    // Cancela timer pendente e executa imediatamente
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
+    // Aguarda escrita em curso (se houver)
+    if (this._writePromise) await this._writePromise.catch(() => {});
     if (!this._dirty) return;
     await this._writeToDisk();
   }
@@ -189,20 +211,37 @@ export class AnalysisCacheService {
   async _writeToDisk() {
     if (this._writing) return;
     this._writing = true;
-    try {
-      await mkdir(CACHE_DIR, { recursive: true });
-      const data = {
-        version:   CACHE_VERSION,
-        updatedAt: new Date().toISOString(),
-        tracks:    Object.fromEntries(this._cache),
-      };
-      await writeFile(CACHE_FILE, JSON.stringify(data, null, 2), "utf-8");
-      this._dirty = false;
-      logger.debug("ANALYSIS_CACHE", `Cache salvo — ${this._cache.size} faixas`);
-    } catch (err) {
-      logger.error("ANALYSIS_CACHE", `Falha ao salvar cache: ${err.message}`);
-    } finally {
-      this._writing = false;
-    }
+    // Marcamos limpo ANTES do snapshot; qualquer set() durante a escrita
+    // voltará a marcar dirty, garantindo que não se perca dados.
+    this._dirty = false;
+    this._writePromise = (async () => {
+      try {
+        await mkdir(CACHE_DIR, { recursive: true });
+        const data = {
+          version:   CACHE_VERSION,
+          updatedAt: new Date().toISOString(),
+          tracks:    Object.fromEntries(this._cache),
+        };
+        // Escrita atômica: grava em .tmp e rename (atômico no Linux dentro do mesmo fs).
+        // Se o processo for morto durante writeFile(.tmp), o CACHE_FILE original fica intacto.
+        const tmpFile = CACHE_FILE + ".tmp";
+        await writeFile(tmpFile, JSON.stringify(data, null, 2), "utf-8");
+        await rename(tmpFile, CACHE_FILE);
+        // Cópia de backup após escrita bem-sucedida — usada para recuperação no load().
+        await copyFile(CACHE_FILE, BACKUP_FILE).catch(e =>
+          logger.warn("ANALYSIS_CACHE", `Falha ao criar backup: ${e.message}`)
+        );
+        logger.debug("ANALYSIS_CACHE", `Cache salvo — ${this._cache.size} faixas`);
+      } catch (err) {
+        this._dirty = true; // restaura dirty para tentar novamente
+        logger.error("ANALYSIS_CACHE", `Falha ao salvar cache: ${err.message}`);
+      } finally {
+        this._writing = false;
+        this._writePromise = null;
+        // Se novas entradas chegaram durante a escrita, agenda novo save.
+        if (this._dirty) this._scheduleSave();
+      }
+    })();
+    return this._writePromise;
   }
 }

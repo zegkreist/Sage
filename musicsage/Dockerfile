@@ -84,6 +84,10 @@ COPY --from=agents-builder /agents/Transporter  /agents/Transporter
 COPY agents/TideCaller/scripts  /agents/TideCaller/scripts
 COPY agents/TideCaller/setup    /agents/TideCaller/setup
 COPY agents/TideCaller/config   /agents/TideCaller/config
+# Cria o venv do TideCaller e instala dependências nele.
+# Isso garante que TC_PYTHON (.venv_tidal/bin/python3) exista no container.
+RUN python3 -m venv /agents/TideCaller/.venv_tidal \
+    && /agents/TideCaller/.venv_tidal/bin/pip install --no-cache-dir tidalapi streamrip
 # Atenção: o token OAuth do Tidal fica em /agents/TideCaller/config/.config
 # Monte um volume ou passe via env para persistência: -v tidal-config:/agents/TideCaller/config
 
@@ -113,7 +117,7 @@ RUN rm -rf /agents/Stormbringer/downloads \
                 /downloads/stormbringer/filmes \
                 /downloads/stormbringer/series \
                 /downloads/tidecaller \
-                /data/logs /data/embeddings /data/playlists \
+                /data/logs /data/embeddings /data/playlists /data/streamrip \
                 /media/music /media/movies /media/series
 
 # ─── Entrypoint ───────────────────────────────────────────────────────────────

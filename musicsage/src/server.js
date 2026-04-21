@@ -33,11 +33,13 @@ export function createServer({ libraryScanner, historyService, recommendationEng
   const router = express.Router();
 
   // Log de cada request /api: method, path, status, ms
+  // Exclui /health para não poluir o log com pings do Docker/uptime
   router.use((req, res, next) => {
     const start = Date.now();
-    res.on("finish", () =>
-      logger.http(req.method, "/api" + req.path, res.statusCode, Date.now() - start)
-    );
+    res.on("finish", () => {
+      if (req.path === "/health") return;
+      logger.http(req.method, "/api" + req.path, res.statusCode, Date.now() - start);
+    });
     next();
   });
 

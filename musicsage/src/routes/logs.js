@@ -52,6 +52,24 @@ export function logsRouter(router) {
     res.json({ lines, date: new Date().toISOString().slice(0, 10), size: content.length });
   });
 
+  /** GET /api/logs/file/:name — conteúdo completo de qualquer arquivo de log (proteção path traversal) */
+  router.get("/logs/file/:name", (req, res) => {
+    const name = req.params.name;
+    // Aceita apenas nomes no formato "musicsage-YYYY-MM-DD.log" — sem barras nem ".."
+    if (!/^musicsage-\d{4}-\d{2}-\d{2}\.log$/.test(name)) {
+      return res.status(400).json({ error: "Nome de arquivo inválido" });
+    }
+    const fp = join(LOG_DIR, name);
+    if (!existsSync(fp)) return res.status(404).json({ error: "Arquivo não encontrado", lines: [] });
+    try {
+      const content = readFileSync(fp, "utf8");
+      const lines   = content.split("\n").filter(Boolean);
+      res.json({ lines, name, size: content.length });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   /** GET /api/logs/files — lista de arquivos de log */
   router.get("/logs/files", (_req, res) => {
     res.json({ files: listLogFiles() });

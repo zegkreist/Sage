@@ -18,7 +18,7 @@ class DownloadManager extends EventEmitter {
     this.client = new WebTorrent({ natUpnp: false, natPmp: false });
     this.activeTorrents = new Map();
     this.metadataEnricher = new MetadataEnricher(config);
-    this.stateFile = path.join(__dirname, "../.download-state.json");
+    this.stateFile = config.downloads?.stateFile || path.join(__dirname, "../.download-state.json");
 
     // Criar diretórios se não existirem
     this.ensureDirectories();

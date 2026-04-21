@@ -1,9 +1,10 @@
 {
   "downloads": {
-    "baseDir": "./downloads",
-    "movies": "./downloads/filmes",
-    "series": "./downloads/series",
-    "music": "./downloads/musicas"
+    "baseDir": "/downloads/stormbringer",
+    "movies": "/downloads/stormbringer/filmes",
+    "series": "/downloads/stormbringer/series",
+    "music": "/downloads/stormbringer/musicas",
+    "stateFile": "/data/stormbringer/.download-state.json"
   },
   "torrent": {
     "maxConnections": 100,
@@ -16,11 +17,11 @@
   },
   "series": {
     "checkInterval": "0 */6 * * *",
-    "trackerFile": "./series_tracker.json"
+    "trackerFile": "/data/stormbringer/series_tracker.json"
   },
   "music": {
     "checkInterval": "0 */12 * * *",
-    "trackerFile": "./music_tracker.json",
+    "trackerFile": "/data/stormbringer/music_tracker.json",
     "feeds": [
       {
         "name": "The Pirate Bay - Music",

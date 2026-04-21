@@ -33,10 +33,11 @@ function loadStormbringerConfig() {
   // Resolver paths relativos para absolutos
   const dl = raw.downloads;
   raw.downloads = {
-    baseDir: resolve(STORMBRINGER_DIR, dl.baseDir),
-    movies:  resolve(STORMBRINGER_DIR, dl.movies),
-    series:  resolve(STORMBRINGER_DIR, dl.series),
-    music:   resolve(STORMBRINGER_DIR, dl.music),
+    baseDir:   resolve(STORMBRINGER_DIR, dl.baseDir),
+    movies:    resolve(STORMBRINGER_DIR, dl.movies),
+    series:    resolve(STORMBRINGER_DIR, dl.series),
+    music:     resolve(STORMBRINGER_DIR, dl.music),
+    stateFile: dl.stateFile ? resolve(STORMBRINGER_DIR, dl.stateFile) : join(STORMBRINGER_DIR, ".download-state.json"),
   };
   if (raw.music?.trackerFile) {
     raw.music.trackerFile = resolve(STORMBRINGER_DIR, raw.music.trackerFile);
@@ -87,10 +88,13 @@ const _oauthSessions = new Map();
 // Jobs do TideCaller em andamento / histórico recente (limpos após 30 min)
 const _tidalJobs = new Map();
 // Path do state file do Stormbringer
-const SB_STATE_FILE = join(STORMBRINGER_DIR, ".download-state.json");
+const SB_STATE_FILE = loadStormbringerConfig().downloads.stateFile;
 
-// Python venv do TideCaller
-const TC_PYTHON = join(TIDECALLER_DIR, ".venv_tidal", "bin", "python3");
+// Python venv do TideCaller.
+// Em container o venv pode não existir (deps instaladas no Python do sistema);
+// nesse caso cai para o python3 do sistema.
+const _TC_VENV_PYTHON = join(TIDECALLER_DIR, ".venv_tidal", "bin", "python3");
+const TC_PYTHON = existsSync(_TC_VENV_PYTHON) ? _TC_VENV_PYTHON : "python3";
 const TC_QUERY  = join(TIDECALLER_DIR, "scripts", "tidal_query.py");
 
 /** Executa tidal_query.py e resolve com o JSON parseado da última linha. */
@@ -440,9 +444,9 @@ export function toolsRouter(router) {
   });
 
   // ── POST /api/tools/tidecaller/artist/download-albums ────────────────────
-  // Body: { albums: [{id, name}] }
+  // Body: { albums: [{id, name}], artistName? }
   router.post("/tools/tidecaller/artist/download-albums", async (req, res) => {
-    const { albums } = req.body || {};
+    const { albums, artistName } = req.body || {};
     if (!Array.isArray(albums) || !albums.length) {
       return res.status(400).json({ error: "'albums' deve ser array não vazio" });
     }
@@ -452,11 +456,17 @@ export function toolsRouter(router) {
     const jobId = randomUUID();
     const job = {
       jobId,
-      startTime: Date.now(),
+      artistName: artistName || null,
+      startedAt:  new Date().toISOString(),
+      finishedAt: null,
       status: "running",
       albums: ids.map(id => ({ id, name: albumMeta[id] || id, status: "pending" })),
+      lastError: null,
     };
     _tidalJobs.set(jobId, job);
+
+    const label = artistName ? `${artistName} (${ids.length} álbuns)` : `${ids.length} álbuns`;
+    logger.info("SERVER", `TideCaller download iniciado — jobId=${jobId} ${label}`);
 
     const env = { ...process.env, XDG_CONFIG_HOME: join(TIDECALLER_DIR, "config", ".config") };
     const proc = spawn(TC_PYTHON, [TC_QUERY, "download-albums", ...ids], {
@@ -467,7 +477,7 @@ export function toolsRouter(router) {
     proc.stdout.on("data", chunk => {
       buf += chunk.toString();
       const lines = buf.split("\n");
-      buf = lines.pop(); // keep incomplete line
+      buf = lines.pop();
       for (const line of lines) {
         const t = line.trim();
         if (!t) continue;
@@ -475,27 +485,37 @@ export function toolsRouter(router) {
           const parsed = JSON.parse(t);
           if (parsed.albumId) {
             const entry = job.albums.find(a => a.id === parsed.albumId);
-            if (entry) entry.status = parsed.ok ? "done" : "error";
+            if (entry) {
+              entry.status = parsed.ok ? "done" : "error";
+              const icon = parsed.ok ? "✓" : "✗";
+              logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"`);
+            }
           } else if (parsed.done) {
             job.status = "done";
           }
-        } catch { /* non-JSON line, ignore */ }
+        } catch { /* non-JSON line — ignore */ }
       }
     });
-    proc.stderr.on("data", chunk => { job.lastError = chunk.toString().slice(-200); });
+    proc.stderr.on("data", chunk => { job.lastError = chunk.toString().slice(-300); });
     proc.on("close", code => {
+      job.finishedAt = new Date().toISOString();
       job.status = job.status === "running" ? (code === 0 ? "done" : "error") : job.status;
       job.albums.forEach(a => { if (a.status === "pending") a.status = code === 0 ? "done" : "error"; });
-      // Limpar após 30 min
-      setTimeout(() => _tidalJobs.delete(jobId), 30 * 60 * 1000);
+      const done  = job.albums.filter(a => a.status === "done").length;
+      const error = job.albums.filter(a => a.status === "error").length;
+      const icon  = job.status === "done" ? "✓" : "✗";
+      logger.info("SERVER", `TideCaller download ${icon} jobId=${jobId} ${label} — ok=${done} erros=${error} (código=${code})`);
+      if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);
+      // Limpar após 60 min
+      setTimeout(() => _tidalJobs.delete(jobId), 60 * 60 * 1000);
     });
     proc.on("error", err => {
       job.status = "error";
+      job.finishedAt = new Date().toISOString();
       job.lastError = err.message;
-      logger.error("SERVER", `TC download-albums error: ${err.message}`);
+      logger.error("SERVER", `TideCaller spawn error jobId=${jobId}: ${err.message}`);
     });
 
-    logger.info("SERVER", `TideCaller download-albums jobId=${jobId} albums=${ids.join(", ")}`);
     res.json({ ok: true, jobId, status: "running", count: ids.length, albumIds: ids });
   });
 

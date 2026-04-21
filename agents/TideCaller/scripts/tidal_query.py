@@ -131,7 +131,9 @@ def cmd_list_albums(artist_id: str):
 
 
 def cmd_download_albums(album_ids: list[str]):
-    rip_bin = AGENT_DIR / ".venv_tidal" / "bin" / "rip"
+    # Prefere o binário do venv; cai para o rip do sistema se não existir
+    _venv_rip = AGENT_DIR / ".venv_tidal" / "bin" / "rip"
+    rip_bin = str(_venv_rip) if _venv_rip.exists() else "rip"
     env = {
         **os.environ,
         "XDG_CONFIG_HOME": str(AGENT_DIR / "config" / ".config"),
@@ -141,18 +143,20 @@ def cmd_download_albums(album_ids: list[str]):
         url = f"https://tidal.com/browse/album/{aid}"
         try:
             r = subprocess.run(
-                [str(rip_bin), "url", url],
+                [rip_bin, "url", url],
                 cwd=str(AGENT_DIR),
                 env=env,
                 capture_output=True,
                 text=True,
             )
-            results.append({"albumId": aid, "ok": r.returncode == 0, "url": url})
+            ok = r.returncode == 0
+            results.append({"albumId": aid, "ok": ok, "url": url,
+                             "error": r.stderr.strip()[-300:] if not ok and r.stderr else None})
         except Exception as e:
             results.append({"albumId": aid, "ok": False, "error": str(e), "url": url})
-        # Flush one line at a time so the caller can track progress
+        # Flush uma linha por vez para que o chamador acompanhe o progresso
         print(json.dumps(results[-1], ensure_ascii=False), flush=True)
-    # Final summary
+    # Resumo final
     _out({"done": True, "results": results})
 
 

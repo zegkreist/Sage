@@ -86,7 +86,7 @@
         maxDurationSecs: maxSecs,
         skipExisting,
       });
-      toast('Análise iniciada…');
+      toast.info('Análise iniciada…');
       // Força o progresso aparecer imediatamente com estado "iniciando"
       if (!progress) progress = { running: true, total: 0, processed: 0, done: 0, failed: 0, pct: 0, current: '' };
       startPolling();
