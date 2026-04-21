@@ -71,17 +71,45 @@ export class MusicOrganizer {
         const info = parseAlbumFolderName(item);
         await this._moveRelease(itemPath, info.artist, info.album, info.year, prefix);
       } else {
-        // Caso C/D: artista com subpastas de álbum  OU  pasta residual sem áudio
+        // Caso C/D/F: artista com subpastas de álbum OU pasta residual sem áudio
+        // F inclui estruturas de 3 níveis: Artist/Year/Album/tracks
         let hasRelease = false;
         for (const sub of fs.readdirSync(itemPath)) {
           const subPath = path.join(itemPath, sub);
           if (!fs.statSync(subPath).isDirectory()) continue;
+
           if (isReleaseFolder(subPath)) {
+            // Caso C/D: Artist/Album/tracks  ou  Artist/Year - Album/tracks
             hasRelease = true;
-            const artist = item;
             const info = parseAlbumFolderName(sub);
-            const resolvedArtist = info.artist !== "Unknown Artist" ? info.artist : artist;
-            await this._moveRelease(subPath, resolvedArtist, info.album, info.year, prefix);
+            // Se o parse retornou um artista que é um número de 4 dígitos (ano),
+            // o nome real do artista é o da pasta pai (item).
+            // Além disso, nesse caso o "artista" extraído é na verdade o ano.
+            const subArtistIsYear = /^\d{4}$/.test(info.artist);
+            const resolvedArtist = (info.artist !== "Unknown Artist" && !subArtistIsYear)
+              ? info.artist
+              : item;
+            const resolvedYear = info.year || (subArtistIsYear ? info.artist : null);
+            await this._moveRelease(subPath, resolvedArtist, info.album, resolvedYear, prefix);
+          } else {
+            // Caso F: Artist/Year/Album/tracks — pasta intermediária (ex: ano como subdir)
+            for (const subsub of fs.readdirSync(subPath)) {
+              const subsubPath = path.join(subPath, subsub);
+              if (!fs.statSync(subsubPath).isDirectory()) continue;
+              if (!isReleaseFolder(subsubPath)) continue;
+
+              hasRelease = true;
+              const info = parseAlbumFolderName(subsub);
+              // Artista sempre é a pasta raiz (item); sub pode ser o ano (ex: "1970")
+              const yearFromSub = /^\d{4}$/.test(sub) ? sub : null;
+              const subArtistIsYear = /^\d{4}$/.test(info.artist);
+              const resolvedArtist = (info.artist !== "Unknown Artist" && !subArtistIsYear)
+                ? info.artist
+                : item;
+              const resolvedYear = info.year || yearFromSub || (subArtistIsYear ? info.artist : null);
+              await this._moveRelease(subsubPath, resolvedArtist, info.album, resolvedYear, prefix);
+            }
+            if (!this.dryRun) removeIfEmpty(subPath);
           }
         }
         if (!this.dryRun) {
