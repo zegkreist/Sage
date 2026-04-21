@@ -1,415 +1,346 @@
-# Plex Media Server — Monorepo
+# MusicSage
 
-Servidor Plex pessoal com Docker, agentes de automação e IA local via Ollama.
+Dashboard de música com IA — busca torrents via Jackett, baixa com WebTorrent, integra ao Tidal via streamrip e conversa com sua biblioteca musical em linguagem natural.
 
-## 📁 Estrutura do projeto
-
-```
-plex_server/
-├── docker-compose.yml       # Configuração Docker (Plex + Ollama)
-├── .env                     # Variáveis de ambiente (não commitar!)
-├── plex-cli.js              # CLI central para operar todos os agentes
-├── package.json             # npm workspaces (raiz) + scripts atalho
-├── ollama-setup.sh          # Gerenciamento de modelos Ollama
-├── config/                  # Configurações do Plex (persistência)
-├── tv/                      # Séries
-├── movies/                  # Filmes
-├── music/                   # Músicas
-├── ollama/                  # Modelos LLM baixados
-├── agents/
-│   ├── AllFather/           # Biblioteca de IA compartilhada
-│   ├── MusicCurator/        # Agente de curadoria de música
-│   ├── SeriesCurator/       # Agente de curadoria de séries
-│   ├── Stormbringer/        # Agente de torrent + organização Plex
-│   ├── TideCaller/          # Agente de download via Tidal (streamrip)
-│   └── Transporter/         # Utilitários compartilhados (Node.js)
-├── OLLAMA.md                # Documentação completa do Ollama
-└── GPU-NVIDIA.md            # Guia de configuração GPU NVIDIA
-```
-
-> Os agentes Node.js são gerenciados como **npm workspaces**: um único `npm install` na raiz instala todas as dependências.
+Roda no seu NAS (ZimaOS, Synology, Unraid, TrueNAS). Conecta a um Plex, Ollama e Jackett que podem estar em qualquer máquina da rede.
 
 ---
 
-## 🤖 Agentes
+## O que é
 
-### 🧙 AllFather
-
-Biblioteca compartilhada de IA, usada pelos outros agentes para se comunicar com o Ollama (LLMs locais).
-
-- Encapsula toda a lógica de comunicação com o Ollama
-- Fornece métodos `ask()`, `askWithContext()` e `askForJSON()`
-- Suporta controle de temperatura, reasoning on/off e respostas em JSON estruturado
-
-```javascript
-import { AllFather } from "@plex-agents/allfather";
-
-const ai = new AllFather({ model: "deepseek-r1:1.5b", disableReasoning: true });
-
-const genre = await ai.askWithContext("Qual o gênero desta música?", {
-  trackName: "Bohemian Rhapsody",
-  artist: "Queen",
-});
-```
+| Módulo | Função |
+|---|---|
+| **Dashboard** | Interface web — biblioteca, recomendações, playlists, downloads |
+| **Stormbringer** | Busca e baixa torrents (músicas, filmes, séries) via Jackett |
+| **TideCaller** | Baixa músicas em alta qualidade (FLAC 24-bit) via Tidal/streamrip |
+| **Transporter** | Move downloads concluídos para as pastas corretas do Plex |
+| **AllFather** | Camada de IA (Ollama) — análise, embeddings, chat com a biblioteca |
 
 ---
 
-### 🎵 MusicCurator
+## Dependências externas
 
-Agente responsável por organizar e normalizar a biblioteca de música.
+O Sage **não embarca** esses serviços — você os sobe separadamente no NAS:
 
-**O que faz:**
-
-- **Consolidação de biblioteca**: varre todos os álbuns em `music/`, normaliza nomes de pasta para o formato `Artista — Álbum (Ano)`, consolida faixas duplicadas e remove pastas vazias
-- **Correção de tags ALBUM**: compara a tag `ALBUM` embutida em cada arquivo de áudio com o nome da pasta; reescreve via `ffmpeg` apenas onde há discrepância
-- **Correção focada**: modo restrito que reprocessa somente álbuns já marcados como `[CURATED]`
-- **Dry-run**: todos os comandos têm modo `--dry-run` que simula as mudanças sem tocar nos arquivos
-
-📖 [Ver documentação completa →](agents/MusicCurator/README.md)
+| Serviço | Porta | Para quê |
+|---|---|---|
+| **Plex** | 32400 | Servidor de mídia — o Sage lê a biblioteca e dispara rescans |
+| **Ollama** | 11434 | LLM local — análise de faixas, recomendações, embeddings |
+| **Jackett** | 9117 | Indexador de torrents — agrega múltiplos trackers numa API só |
+| **FlareSolverr** | 8191 | Resolve Cloudflare para indexers protegidos do Jackett |
 
 ---
 
-### 📺 SeriesCurator
+## Setup no ZimaOS / CasaOS
 
-Agente responsável por organizar a biblioteca de séries de TV.
+### 1. Suba o Jackett + FlareSolverr
 
-**O que faz:**
+O Jackett depende do FlareSolverr para acessar indexers que usam Cloudflare. Eles rodam no mesmo compose.
 
-- **Curadoria de séries**: varre `tv/`, identifica arquivos de episódio e renomeia pastas e arquivos para o padrão `Nome da Série (Ano)/Season XX/S01E01 - Título.ext`
-- **Agrupamento inteligente**: reconhece variantes do mesmo nome (`Game.of.Thrones`, `Game_of_Thrones` → mesma série)
-- **Consolidação de temporadas**: move episódios espalhados em pastas diferentes para um único diretório
-- **Correção de tags de vídeo**: atualiza `title`, `season_number` e `episode_sort` via `ffmpeg`
-- **Integração com AllFather**: usa IA para identificar nomes canônicos quando há ambiguidade
-- **Dry-run**: modo simulação para revisar todas as mudanças antes de aplicar
+```yaml
+# docker-compose — Jackett + FlareSolverr
+name: flaresolverr
+services:
 
-> Requer `sudo` porque o diretório `tv/` é criado como `root:root` pelo Docker.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/Sao_Paulo
+    ports:
+      - "8191:8191"   # API usada internamente pelo Jackett
+    # Sem volumes — FlareSolverr é stateless (só processa requests)
 
-📖 [Ver documentação completa →](agents/SeriesCurator/README.md)
-
----
-
-### ⚡ Stormbringer
-
-Agente de torrent — busca, baixa e organiza mídia nas pastas do Plex automaticamente.
-
-**O que faz:**
-
-- **Daemon de downloads**: monitora um cliente de torrent (qBittorrent) e detecta downloads concluídos
-- **Busca interativa**: pesquisa torrents por nome e filtra por qualidade, idioma e seeders
-- **Organização automática**: move filmes, séries e músicas baixadas para `movies/`, `tv/` e `music/` no formato correto para o Plex
-- **Fuzzy dedup de álbuns**: evita duplicatas usando similaridade de string (threshold 0.85) + detecção de recordings ao vivo (`live`, `ao vivo`, etc.)
-- **Cover art**: extrai e salva capas de álbum a partir dos metadados de áudio (`music-metadata`)
-- **Dry-run**: modo simulação para revisar antes de mover os arquivos
-
-📖 [Ver documentação completa →](agents/Stormbringer/README.md)
-
----
-
-### 🌊 TideCaller
-
-Agente de download de alta qualidade via **Tidal** usando [streamrip](https://github.com/nathom/streamrip).
-
-**O que faz:**
-
-- **Download via Tidal**: baixa músicas, álbuns e playlists em até 24-bit/192kHz (MQA/FLAC)
-- **Dockerizado**: roda sobre Python + streamrip em container isolado, sem poluir o sistema
-- **Token auto-refresh**: mantém as credenciais do Tidal atualizadas via script
-- **Organização de biblioteca**: integra com o fluxo de organização da `music/`
-
-**Comandos via `plex-cli`:**
-
-| Comando                       | Script interno                | Descrição                                                         |
-| ----------------------------- | ----------------------------- | ----------------------------------------------------------------- |
-| `tidecaller:rip`              | `scripts/rip.sh`              | Baixa uma URL do Tidal (álbum, faixa, playlist)                   |
-| `tidecaller:download-artists` | `scripts/download_artists.sh` | Baixa todos os artistas em `artist_urls.txt`                      |
-| `tidecaller:organize`         | `scripts/organize_albums.sh`  | Organiza os downloads na biblioteca                               |
-| `tidecaller:enrich`           | `scripts/enrich_metadata.sh`  | Enriquece metadados via MusicBrainz                               |
-| `tidecaller:refresh-token`    | `scripts/refresh_token.sh`    | Zera tokens + re-autentica (device auth interativo)               |
-| `tidecaller:download-artist`  | `scripts/download_artist.sh`  | Busca artista no Tidal e baixa discografia ou álbuns selecionados |
-
-📖 [Ver documentação completa →](agents/TideCaller/README.md)
-
----
-
-### 🚚 Transporter
-
-Biblioteca de utilitários compartilhados para organização de mídia, usada pelo Stormbringer (e futuramente pelo TideCaller).
-
-**Módulos exportados (`@plex-agents/transporter`):**
-
-| Módulo       | Funções principais                                                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `strings`    | `sanitizeName`, `cleanAlbumName`, `normalizeForComparison`, `calculateSimilarity`                                                |
-| `live`       | `isLiveRecording`                                                                                                                |
-| `audio`      | `AUDIO_EXTENSIONS`, `isAudioFile`, `isDiscFolder`, `hasDirectAudio`, `isReleaseFolder`, `findAudioFiles`, `parseAlbumFolderName` |
-| `filesystem` | `ensureDir`, `moveFile`, `removeIfEmpty`, `saveCoverArt`                                                                         |
-| `dedup`      | `findExistingAlbumDir`                                                                                                           |
-
----
-
-## 🖥️ plex-cli — Operando os agentes
-
-O `plex-cli.js` é o ponto central de controle de todos os agentes. Roda a partir da raiz do projeto.
-
-### Modos de uso
-
-```bash
-# Menu interativo numerado (recomendado para explorar)
-node plex-cli.js
-
-# Executar um comando diretamente (útil em scripts)
-node plex-cli.js <comando>
-
-# Listar todos os comandos disponíveis
-node plex-cli.js --help
-
-# Via npm scripts (atalhos equivalentes)
-npm run cli
-npm run <comando>
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    restart: unless-stopped
+    depends_on:
+      flaresolverr:
+        condition: service_started
+    environment:
+      - AUTO_UPDATE=true    # atualiza o Jackett automaticamente (recomendado)
+      - PUID=1000            # UID do usuário dono dos arquivos de config
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+    ports:
+      - "9117:9117"
+    volumes:
+      # Persiste a config do Jackett (API key, indexers configurados)
+      # Sem esse volume você perderia toda a config ao recriar o container
+      - /DATA/AppData/flaresolverr/config:/config
 ```
 
-**Exemplos rápidos:**
+**Por que dois serviços no mesmo compose?**
+O `depends_on` garante que o FlareSolverr já está de pé quando o Jackett inicia. Se o Jackett tentar resolver um indexer com Cloudflare antes do FlareSolverr estar pronto, a requisição falha.
 
-```bash
-node plex-cli.js stormbringer:plex-organize:dry   # preview antes de mover arquivos
-node plex-cli.js stormbringer:search              # busca torrent interativamente
-node plex-cli.js plex:scan                        # força re-scan das bibliotecas
-npm run test:all                                  # roda todos os testes
+**Configurando o Jackett para usar o FlareSolverr:**
+Acesse `http://<IP-DO-NAS>:9117` → `Jackett Configuration` → `FlareSolverr API URL`:
+```
+http://flaresolverr:8191   ← nome do container, já que estão na mesma rede bridge
 ```
 
 ---
 
-### Comandos disponíveis
+### 2. Configure os indexers no Jackett
 
-#### 🎵 Música
+`+ Add Indexer` → adicione os indexers que preferir (1337x, TorrentGalaxy, RuTracker, etc.).
 
-| Comando                  | Descrição                                          |
-| ------------------------ | -------------------------------------------------- |
-| `music:consolidate`      | Consolida biblioteca (normaliza pastas + tags)     |
-| `music:fix-all-tags`     | Corrige tags ALBUM incorretas em toda a biblioteca |
-| `music:fix-all-tags:dry` | Idem, sem aplicar mudanças (dry-run)               |
-| `music:fix-tags`         | Corrige tags apenas nos álbuns já curados          |
-| `music:fix-tags:dry`     | Idem, sem aplicar mudanças (dry-run)               |
-| `music:test`             | Roda a suíte de testes do MusicCurator             |
-
-#### 📺 Séries
-
-| Comando               | Descrição                                                 |
-| --------------------- | --------------------------------------------------------- |
-| `series:curate`       | Cura a biblioteca de séries (requer sudo)                 |
-| `series:curate:dry`   | Idem, sem aplicar mudanças (dry-run, requer sudo)         |
-| `series:fix-tags`     | Corrige tags de vídeo dos episódios curados (requer sudo) |
-| `series:fix-tags:dry` | Idem, sem aplicar mudanças (dry-run)                      |
-| `series:test`         | Roda a suíte de testes do SeriesCurator                   |
-
-#### ⚡ Stormbringer
-
-| Comando                          | Descrição                                        |
-| -------------------------------- | ------------------------------------------------ |
-| `stormbringer:start`             | Inicia o daemon de downloads (fica rodando)      |
-| `stormbringer:search`            | Busca torrent interativamente pelo nome          |
-| `stormbringer:downloads`         | Lista status dos downloads em andamento          |
-| `stormbringer:plex-organize`     | Move downloads concluídos para as pastas do Plex |
-| `stormbringer:plex-organize:dry` | Idem, sem mover arquivos (dry-run)               |
-| `stormbringer:test`              | Roda a suíte de testes do Stormbringer           |
-
-#### 🌊 TideCaller
-
-| Comando                       | Descrição                                                         |
-| ----------------------------- | ----------------------------------------------------------------- |
-| `tidecaller:rip`              | Baixar uma URL do Tidal (álbum, faixa ou playlist) via streamrip  |
-| `tidecaller:download-artists` | Baixar discografias dos artistas listados em `artist_urls.txt`    |
-| `tidecaller:organize`         | Organizar downloads do Tidal na biblioteca de música              |
-| `tidecaller:enrich`           | Enriquecer metadados via MusicBrainz                              |
-| `tidecaller:refresh-token`    | Zerar tokens expirados e re-autenticar no Tidal (device auth)     |
-| `tidecaller:download-artist`  | Buscar artista no Tidal e baixar discografia ou álbuns escolhidos |
-
-> **Nota:** `tidecaller:rip` precisa de uma URL como argumento adicional. Use diretamente no terminal: `cd agents/TideCaller && bash scripts/rip.sh url https://tidal.com/browse/album/...`
-
-#### 🧪 Testes
-
-| Comando             | Descrição                                                          |
-| ------------------- | ------------------------------------------------------------------ |
-| `test:all`          | Roda todos os testes (MusicCurator + SeriesCurator + Stormbringer) |
-| `test:music`        | Apenas testes do MusicCurator                                      |
-| `test:series`       | Apenas testes do SeriesCurator                                     |
-| `test:stormbringer` | Apenas testes do Stormbringer                                      |
-
-#### 🐳 Docker / Plex
-
-| Comando        | Descrição                                         |
-| -------------- | ------------------------------------------------- |
-| `plex:status`  | Status dos containers (`docker compose ps`)       |
-| `plex:start`   | Sobe todos os containers (`docker compose up -d`) |
-| `plex:stop`    | Para todos os containers                          |
-| `plex:restart` | Reinicia o container do Plex                      |
-| `plex:logs`    | Logs do Plex (últimas 50 linhas, modo follow)     |
-| `plex:scan`    | Força o Plex a reescanear as bibliotecas via API  |
+> **Importante:** depois de adicionar, copie a **Jackett API Key** (`http://<NAS>:9117` → API Key no topo da página). Você vai precisar dela como variável de ambiente do Sage.
 
 ---
 
-## 🚀 Setup
+### 3. Suba o Sage
 
-### Pré-requisitos
+```yaml
+# docker-compose — MusicSage
+name: picturesque_alan
+services:
+  main_app:
+    image: zegkreist/musicsage:latest
+    container_name: Sage
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
 
-- Docker e Docker Compose instalados
-- Conta Plex gratuita em <https://www.plex.tv/>
-- Node.js 18+
+    environment:
+      # ── Plex ───────────────────────────────────────────────────────────────
+      # URL do servidor Plex na sua rede local
+      - PLEX_URL=http://192.168.15.14:32400
 
-### 1. Configure o `.env`
+      # Onde a mídia do Plex está montada DENTRO deste container
+      # /media será o equivalente à raiz — o Sage acessa /media/music, /media/movies etc.
+      - PLEX_MEDIA_PATH=/media
 
-```dotenv
-PLEX_CLAIM=claim-xxxxxxxxxx     # https://www.plex.tv/claim/  (válido por 4 min, 1ª execução)
-PLEX_TOKEN=xxxxxxxxxxxx         # Token para API do Plex (plex:scan)
-PUID=1000
-PGID=1000
-TZ=America/Sao_Paulo
-MUSIC_PATH=/caminho/para/music
-SERIES_PATH=/caminho/para/tv
-MOVIES_PATH=/caminho/para/movies
-```
+      # Pasta de config do Plex — necessária para extrair o PLEX_TOKEN automaticamente
+      # do arquivo Preferences.xml (evita passar o token via env)
+      - PLEX_CONFIG_DIR=/plex-config
 
-> Para descobrir seu `PUID`/`PGID`: `id`
+      # ── Ollama ─────────────────────────────────────────────────────────────
+      # LLM local para análise, recomendações e embeddings
+      - OLLAMA_URL=http://192.168.15.94:11434
+      - OLLAMA_DEFAULT_MODEL=gemma4:e4b
 
-### 2. Instale as dependências (todos os agentes de uma vez)
+      # Modelo de embeddings para busca semântica na biblioteca
+      - EMBEDDING_MODEL=nomic-embed-text
 
-```bash
-npm install
-```
+      # ── Jackett ────────────────────────────────────────────────────────────
+      # URL do Jackett — usada pelo Stormbringer para buscar torrents
+      - JACKETT_URL=http://192.168.15.14:9117
+      # A API key do Jackett é lida automaticamente do volume /jackett-config
+      # (arquivo ServerConfig.json dentro da pasta de config do Jackett/FlareSolverr)
 
-> O projeto usa **npm workspaces**. Um único `npm install` na raiz instala as dependências de todos os agentes Node.js (`AllFather`, `MusicCurator`, `SeriesCurator`, `Stormbringer`, `Transporter`) em um `node_modules/` compartilhado.
+      # ── Extras ─────────────────────────────────────────────────────────────
+      # Last.fm: enriquece metadados (bio de artistas, tags, similares)
+      - LASTFM_API_KEY=
 
-### 3. Suba os containers
+    volumes:
+      # Mídia do Plex — montada a partir do NAS
+      # O Sage lê daqui para analisar a biblioteca e o Transporter move arquivos para cá
+      - /media/firstBlood/plex:/media
 
-```bash
-docker compose up -d
-```
+      # Config do Plex — necessária apenas para ler o Preferences.xml e extrair o token
+      # Não é necessário se você passar PLEX_TOKEN diretamente nas env vars
+      - /media/ZimaOS-HD/AppData/plex/config:/plex-config
 
-### 4. Configure o Plex pela primeira vez
+      # Dados persistentes do Sage: cache de análises, embeddings, playlists, logs
+      # NUNCA apague esse volume — embeddings levam horas para regenerar
+      - /media/firstBlood/sage/data:/data
 
-Acesse <http://localhost:32400/web> e siga o assistente:
+      # Downloads do Stormbringer e TideCaller
+      # Subpastas: stormbringer/musicas, stormbringer/filmes, stormbringer/series, tidecaller
+      - /media/firstBlood/sage/downloads:/downloads
 
-1. Faça login com sua conta Plex
-2. Dê um nome ao servidor
-3. Adicione as bibliotecas:
-   - **Filmes** → `/movies`
-   - **Séries** → `/tv`
-   - **Música** → `/music`
+      # Config do Jackett montada para leitura da API key
+      # O Sage lê ServerConfig.json daqui automaticamente
+      - /media/ZimaOS-HD/AppData/flaresolverr/config:/jackett-config
 
-### Acessar o Plex
+    # O container precisa de privilégios para montar/acessar os shares de rede do NAS
+    privileged: true
 
-| Contexto | URL                                   |
-| -------- | ------------------------------------- |
-| Local    | <http://localhost:32400/web>          |
-| Na rede  | `http://<IP-DO-SERVIDOR>:32400/web`   |
-| Remoto   | Configure em Settings → Remote Access |
-
-### Backup
-
-```bash
-tar -czf plex-backup-$(date +%Y%m%d).tar.gz config/
+    # Limite de RAM: 16 GB — ajuste conforme disponível no seu NAS
+    deploy:
+      resources:
+        limits:
+          memory: 16508243968
 ```
 
 ---
 
-## 🦙 Setup do Ollama (LLM local)
+## Volumes explicados
 
-O Ollama executa modelos de linguagem localmente, sem custo e sem internet. Os agentes usam o Ollama via **AllFather** para tarefas inteligentes.
-
-### Sem GPU (CPU only)
-
-```bash
-docker compose up -d ollama
-
-# Verificar se está rodando
-curl http://localhost:11434
-# Esperado: "Ollama is running"
-
-# Baixar um modelo
-./ollama-setup.sh pull llama3.2:3b      # recomendado para CPU (3 GB)
-./ollama-setup.sh pull deepseek-r1:1.5b # padrão dos agentes (1 GB)
-```
-
-Modelos úteis para os agentes:
-
-| Modelo             | Tamanho | Uso ideal                       |
-| ------------------ | ------- | ------------------------------- |
-| `llama3.2:1b`      | ~1 GB   | Testes, tarefas simples         |
-| `llama3.2:3b`      | ~3 GB   | Uso geral, boa qualidade        |
-| `deepseek-r1:1.5b` | ~1 GB   | Reasoning, padrão dos agentes   |
-| `deepseek-r1:7b`   | ~4 GB   | Alta qualidade, requer mais RAM |
-
-### Com GPU NVIDIA (5–10x mais rápido)
-
-#### 1. Instale o driver NVIDIA
-
-```bash
-nvidia-smi   # verificar se já está instalado
-
-# Se não estiver (Ubuntu/Debian):
-sudo ubuntu-drivers autoinstall
-# Reinicie após instalar
-```
-
-#### 2. Instale o NVIDIA Container Toolkit
-
-```bash
-# Método automático
-sudo ./setup-nvidia-docker.sh
-
-# Ou manualmente (Ubuntu/Debian)
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-
-sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-```
-
-#### 3. Suba o Ollama com GPU
-
-```bash
-docker compose up -d ollama
-
-# Verificar uso de GPU
-watch -n1 nvidia-smi
-```
-
-📖 [Guia completo de GPU NVIDIA →](GPU-NVIDIA.md)
-📖 [Documentação completa do Ollama →](OLLAMA.md)
+| Volume (host → container) | Por quê |
+|---|---|
+| `/media/firstBlood/plex → /media` | Toda a biblioteca de mídia. O Sage acessa `/media/music`, `/media/movies`, `/media/series`. O Transporter move arquivos concluídos para cá. |
+| `/media/ZimaOS-HD/AppData/plex/config → /plex-config` | Contém `Preferences.xml` com o `PLEX_TOKEN`. O entrypoint extrai o token automaticamente — sem isso você precisaria passar o token manualmente. |
+| `/media/firstBlood/sage/data → /data` | Cache de análises de faixas, embeddings vetoriais, playlists geradas por IA e logs. **Crítico** — nunca apague. |
+| `/media/firstBlood/sage/downloads → /downloads` | Destino dos downloads. Subpastas são criadas automaticamente. Pode ser um disco separado com mais espaço. |
+| `/media/ZimaOS-HD/AppData/flaresolverr/config → /jackett-config` | Config do Jackett — o Sage lê a API key do `ServerConfig.json` automaticamente (sem precisar passar como env var). |
 
 ---
 
-## 🐛 Troubleshooting
+## Variáveis de ambiente
 
-### Container do Plex não inicia
+### Plex
 
-```bash
-docker compose logs plex
-sudo lsof -i :32400   # verificar se a porta já está em uso
-```
+| Variável | Descrição |
+|---|---|
+| `PLEX_URL` | URL do Plex na rede local (`http://IP:32400`) |
+| `PLEX_TOKEN` | Token de autenticação. **Opcional** se `PLEX_CONFIG_DIR` estiver montado — o token é extraído automaticamente do `Preferences.xml`. |
+| `PLEX_MEDIA_PATH` | Caminho de mídia dentro do container (default: `/media`) |
+| `PLEX_CONFIG_DIR` | Pasta de config do Plex — usada para extrair `PLEX_TOKEN` automaticamente |
 
-### Permissões nos diretórios de mídia
+### Ollama
 
-Os diretórios `tv/` e `music/` podem ser criados como `root:root` pelo Docker. Os comandos `series:curate` e `series:fix-tags` já usam `sudo` automaticamente via `plex-cli.js`.
+| Variável | Descrição |
+|---|---|
+| `OLLAMA_URL` | URL do servidor Ollama. Pode ser em outra máquina da rede. |
+| `OLLAMA_DEFAULT_MODEL` | Modelo para análise e chat (ex: `gemma4:e4b`, `llama3.2:3b`) |
+| `EMBEDDING_MODEL` | Modelo para embeddings de busca semântica (ex: `nomic-embed-text`) |
 
-### `plex:scan` não funciona
+### Stormbringer (torrents)
 
-Certifique-se de que `PLEX_TOKEN` está definido no `.env`. Para obter o token: no Plex Web, inspecione qualquer requisição à API — o token aparece como `X-Plex-Token`.
+| Variável | Descrição |
+|---|---|
+| `JACKETT_URL` | URL do Jackett (`http://IP:9117`). Sem isso, o Stormbringer busca só via scraping público. |
 
-### Ollama lento (sem GPU)
+### Extras
 
-Use modelos menores (`llama3.2:1b` ou `deepseek-r1:1.5b`). Para acelerar significativamente, configure a GPU NVIDIA conforme a seção acima.
+| Variável | Descrição |
+|---|---|
+| `LASTFM_API_KEY` | API Key do Last.fm — enriquece bio de artistas e tags. Opcional. |
+| `MUSICSAGE_PORT` | Porta HTTP do Sage (default: `3002`) |
 
 ---
 
-## 🔗 Links úteis
+## Fluxo de download (Stormbringer)
 
-- [Plex Official Website](https://www.plex.tv/)
-- [Plex Docker Image (LinuxServer)](https://docs.linuxserver.io/images/docker-plex)
-- [Ollama](https://ollama.com/)
-- [streamrip](https://github.com/nathom/streamrip)
-- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+```
+Usuário pesquisa no Dashboard
+        ↓
+Stormbringer chama Jackett API
+        ↓
+Jackett consulta os indexers configurados
+(FlareSolverr resolve Cloudflare quando necessário)
+        ↓
+Resultados voltam ao Dashboard (nome, tamanho, seeders, indexer)
+        ↓
+Usuário clica em baixar
+        ↓
+Sage resolve o link (.torrent ou redirect → magnet)
+        ↓
+WebTorrent baixa para /downloads/stormbringer/<tipo>
+        ↓
+Download aparece no Dashboard com progresso em tempo real
+        ↓
+(Futuro) Transporter move para /media/<tipo> e aciona rescan do Plex
+```
+
+---
+
+## Fluxo de download (TideCaller / Tidal)
+
+```
+Usuário cola URL do Tidal (álbum, faixa, playlist)
+        ↓
+TideCaller chama streamrip (Python) no venv isolado
+        ↓
+streamrip autentica no Tidal e baixa em FLAC / MQA
+        ↓
+Arquivos vão para /downloads/tidecaller
+        ↓
+Progresso visível no Dashboard
+```
+
+**Autenticação do Tidal (primeira vez):**
+O token OAuth é salvo dentro do container em `/agents/TideCaller/config/.config`. Para persistir entre recriações, monte esse diretório:
+```yaml
+- tidal-config:/agents/TideCaller/config
+```
+
+---
+
+## Acessando o Sage
+
+Após subir o container, acesse:
+```
+http://<IP-DO-NAS>:3002
+```
+
+API de saúde:
+```
+http://<IP-DO-NAS>:3002/api/health
+```
+
+---
+
+## Plex
+
+O Sage foi desenvolvido pensando no Plex como servidor de mídia, mas **não embarca o Plex** — você o hospeda separadamente.
+
+### Recomendação: hospede o Plex no mesmo NAS
+
+Hostar o Plex no NAS tem vantagens claras:
+- A mídia já está no NAS — sem transferência de rede para transcodagem
+- NAS fica ligado 24/7 — Plex disponível sempre
+- ZimaOS, Synology, QNAP e Unraid têm imagens oficiais do Plex
+
+**docker-compose para o Plex no ZimaOS / CasaOS:**
+
+```yaml
+services:
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    restart: unless-stopped
+    network_mode: host   # necessário para descoberta automática na rede local
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+      - VERSION=docker
+      - PLEX_CLAIM=claim-xxxxxxxxxxxx   # https://plex.tv/claim (válido 4 min, só 1ª vez)
+    volumes:
+      # Config e metadados do Plex — inclui banco de dados, transcodagem e Preferences.xml
+      # O Sage monta essa mesma pasta para extrair o PLEX_TOKEN automaticamente
+      - /media/ZimaOS-HD/AppData/plex/config:/config
+
+      # Mídia — as mesmas pastas montadas no Sage
+      - /media/firstBlood/plex:/media
+```
+
+**Configuração inicial:**
+1. Suba o container e acesse `http://<IP-DO-NAS>:32400/web`
+2. Faça login com conta Plex
+3. Adicione bibliotecas:
+   - **Música** → `/media/music`
+   - **Filmes** → `/media/movies`
+   - **Séries** → `/media/series`
+
+**Obtendo o PLEX_TOKEN** (se não usar `PLEX_CONFIG_DIR`):
+No Plex Web, abra qualquer item → `...` → `Get Info` → `View XML`. O token aparece como `X-Plex-Token=` na URL.
+
+---
+
+## Diagrama geral
+
+```
+NAS (ZimaOS)
+├── Sage :3002          → dashboard, downloads, IA
+├── Plex :32400         → servidor de mídia
+├── Jackett :9117       → indexador de torrents
+└── FlareSolverr :8191  → bypass Cloudflare (usado pelo Jackett)
+
+Outra máquina (ou mesmo NAS)
+└── Ollama :11434       → LLM local (análise, embeddings, chat)
+
+Storage (volumes compartilhados)
+├── /media/music        → biblioteca de músicas (Plex lê, Transporter escreve)
+├── /media/movies       → filmes
+├── /media/series       → séries
+├── /data               → cache do Sage (embeddings, análises, logs)
+└── /downloads          → área de trabalho dos downloads
+```
+
