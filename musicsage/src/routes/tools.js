@@ -634,10 +634,11 @@ export function toolsRouter(router) {
     proc.stderr.on("data", chunk => { _stderrBuf += chunk.toString(); job.lastError = _stderrBuf.slice(-500); });
     proc.on("close", code => {
       job.finishedAt = new Date().toISOString();
-      job.status = job.status === "running" ? (code === 0 ? "done" : "error") : job.status;
-      job.albums.forEach(a => { if (a.status === "pending") a.status = code === 0 ? "done" : "error"; });
+      // Albums still "pending" at close: mark as error (if they got no JSON status they didn't download)
+      job.albums.forEach(a => { if (a.status === "pending") a.status = "error"; });
       const done  = job.albums.filter(a => a.status === "done").length;
       const error = job.albums.filter(a => a.status === "error").length;
+      job.status = job.status === "running" ? (error === 0 && done > 0 ? "done" : "error") : job.status;
       const icon  = job.status === "done" ? "✓" : "✗";
       logger.info("SERVER", `TideCaller download ${icon} jobId=${jobId} ${label} — ok=${done} erros=${error} (código=${code})`);
       if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);

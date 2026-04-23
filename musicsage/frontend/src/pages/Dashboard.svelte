@@ -5,11 +5,12 @@
   import { deriveMoodLabel, relTime } from '$lib/utils.js';
   import { users, selectedUserId } from '$lib/stores/user.js';
 
-  import SectionBox  from '../components/layout/SectionBox.svelte';
-  import StatCard    from '../components/ui/StatCard.svelte';
-  import MoodBar     from '../components/ui/MoodBar.svelte';
-  import TrackRow    from '../components/data/TrackRow.svelte';
-  import Spinner     from '../components/ui/Spinner.svelte';
+  import SectionBox        from '../components/layout/SectionBox.svelte';
+  import StatCard          from '../components/ui/StatCard.svelte';
+  import MoodBar           from '../components/ui/MoodBar.svelte';
+  import TrackRow          from '../components/data/TrackRow.svelte';
+  import Spinner           from '../components/ui/Spinner.svelte';
+  import ShareStoryModal   from '../components/ui/ShareStoryModal.svelte';
 
   // ─── State ───────────────────────────────────────────────
   let stats       = $state(null);
@@ -20,12 +21,17 @@
   let curiosidades = $state([]);
   let history     = $state([]);
   let discoveries = $state([]);
+  let subgenreDistrib = $state([]);  // [{ name, count, pct }]
 
   let loadingStats    = $state(true);
   let loadingMetrics  = $state(false);
   let loadingMood     = $state(true);
   let loadingHistory  = $state(true);
   let loadingDisc     = $state(true);
+
+  // Compartilhar Stories
+  let showShare  = $state(false);
+  let shareTab   = $state('artists');
 
   const periodLabel = { week: '7 dias', month: '30 dias', year: '12 meses' };
 
@@ -87,15 +93,36 @@
     loadingDisc = true;
     try {
       const cache = await api('GET', '/audio/analysis-cache?limit=500');
-      // tracks is a dict { ratingKey: {...} } — convert to array
       const tracksArr = Object.values(cache?.tracks ?? {});
       const played = new Set((history ?? []).map(t => t.ratingKey));
+
+      // Build subgenre distribution from full cache (all analyzed tracks)
+      const sgMap = {};
+      for (const t of tracksArr) {
+        const sg = t.analysis?.subgenre;
+        const g  = t.analysis?.genre;
+        const useSubgenre = sg && sg !== 'unknown' && sg.toLowerCase() !== (g ?? '').toLowerCase();
+        const key = useSubgenre ? sg : (g && g !== 'unknown' ? g : null);
+        if (key) sgMap[key] = (sgMap[key] || 0) + 1;
+      }
+      const total = Object.values(sgMap).reduce((a, b) => a + b, 0);
+      subgenreDistrib = Object.entries(sgMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([name, count]) => ({ name, count, pct: total > 0 ? Math.round(count / total * 100) : 0 }));
+
+      // Discoveries: unplayed tracks sorted by energy desc
       discoveries = tracksArr
-        .filter(t => !played.has(t.ratingKey))
+        .filter(t => !played.has(t.ratingKey) && t.analysis)
+        .sort((a, b) => (b.analysis?.energy ?? 0) - (a.analysis?.energy ?? 0))
         .slice(0, 12)
         .map(t => ({
           ...t,
-          energy: t.analysis?.energy ?? null,
+          energy:   t.analysis?.energy ?? null,
+          mood:     t.analysis?.mood ?? null,
+          subgenre: t.analysis?.subgenre && t.analysis.subgenre !== 'unknown' ? t.analysis.subgenre
+                  : t.analysis?.genre && t.analysis.genre !== 'unknown'     ? t.analysis.genre
+                  : null,
         }));
     } catch { /* non-critical */ }
     finally { loadingDisc = false; }
@@ -173,10 +200,20 @@
           <h2 class="text-sm font-semibold text-white">Curiosidades</h2>
           <p class="text-2xs mt-0.5" style="color:#5a5a78">Fatos sobre o seu gosto musical</p>
         </div>
-        <span class="text-2xs font-medium px-2 py-0.5 rounded-full"
-              style="background:rgba(124,106,245,0.12);color:#9d8eff;border:1px solid rgba(124,106,245,0.2)">
-          {curiosidades.length} insights
-        </span>
+        <div class="flex items-center gap-2">
+          <button
+            onclick={() => { shareTab = 'curiosidades'; showShare = true; }}
+            title="Compartilhar nos Stories"
+            style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:8px;
+                   color:#5a5a78;font-size:13px;line-height:1;transition:color .15s"
+            onmouseenter={(e) => e.currentTarget.style.color='#1db954'}
+            onmouseleave={(e) => e.currentTarget.style.color='#5a5a78'}
+          >⬆ Story</button>
+          <span class="text-2xs font-medium px-2 py-0.5 rounded-full"
+                style="background:rgba(124,106,245,0.12);color:#9d8eff;border:1px solid rgba(124,106,245,0.2)">
+            {curiosidades.length} insights
+          </span>
+        </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {#each curiosidades as fact, i}
@@ -214,8 +251,27 @@
                 <div class="text-2xs mt-1 truncate" style="color:#8888a8">{fact.sub}</div>
               {/if}
 
+            {:else if fact.type === 'list'}
+              <!-- LIST card: ranked genre/subgenre list -->
+              <div class="text-xl mb-2 leading-none">{fact.icon ?? '✦'}</div>
+              <div class="text-2xs font-semibold uppercase tracking-wider mb-2" style="color:{accentColor}">{fact.label}</div>
+              <div class="space-y-1.5">
+                {#each (fact.items ?? []).slice(0, 5) as item, idx}
+                  {@const itemPct = fact.items?.[0]?.count > 0 ? Math.round(item.count / fact.items[0].count * 100) : 0}
+                  <div class="text-2xs">
+                    <div class="flex justify-between mb-0.5">
+                      <span class="truncate text-white" style="max-width:75%">{idx + 1}. {item.name}</span>
+                      <span style="color:#5a5a78">{item.count}</span>
+                    </div>
+                    <div class="h-0.5 rounded-full" style="background:#1c1c28">
+                      <div class="h-0.5 rounded-full" style="width:{itemPct}%;background:{accentColor}88"></div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              {#if fact.sub}<div class="text-2xs mt-2" style="color:#5a5a78">{fact.sub}</div>{/if}
+
             {:else}
-              <!-- STAT card: big value -->
               <div class="text-xl mb-2 leading-none">{fact.icon ?? '✦'}</div>
               <div class="text-2xs font-semibold uppercase tracking-wider mb-1" style="color:#5a5a78">{fact.label}</div>
               <div class="text-lg font-extrabold leading-tight" style="color:{isAccent ? accentColor : 'white'}">{fact.value ?? fact.text ?? '—'}</div>
@@ -274,7 +330,17 @@
 
           <!-- Top Artists -->
           <div>
-            <div class="text-2xs font-semibold mb-3 uppercase tracking-wider" style="color:#5a5a78">Top Artistas</div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Top Artistas</div>
+              <button
+                onclick={() => { shareTab = 'artists'; showShare = true; }}
+                title="Compartilhar nos Stories"
+                style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:8px;
+                       color:#5a5a78;font-size:13px;line-height:1;transition:color .15s"
+                onmouseenter={(e) => e.currentTarget.style.color='#7c6af5'}
+                onmouseleave={(e) => e.currentTarget.style.color='#5a5a78'}
+              >⬆ Story</button>
+            </div>
             {#each (metrics.topArtists ?? []).slice(0,10) as a, i}
               <div class="list-row flex items-center gap-3 py-2">
                 <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
@@ -285,7 +351,7 @@
                 {/if}
                 <div class="flex-1 min-w-0">
                   <div class="text-sm text-white truncate">{a.artist ?? a.title ?? a.name ?? '?'}</div>
-                  <div class="text-2xs truncate" style="color:#5a5a78">{a.genres?.[0] ?? (a.totalMinutes ? a.totalMinutes + ' min' : '')}</div>
+                  <div class="text-2xs truncate" style="color:#5a5a78">{a.analysisGenre ?? a.genres?.[0] ?? (a.totalMinutes ? a.totalMinutes + ' min' : '')}</div>
                 </div>
                 <span class="text-2xs stat-value" style="color:#5a5a78">{fmt(a.playCount ?? 0)}</span>
               </div>
@@ -294,7 +360,17 @@
 
           <!-- Top Tracks -->
           <div>
-            <div class="text-2xs font-semibold mb-3 uppercase tracking-wider" style="color:#5a5a78">Top Faixas</div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Top Faixas</div>
+              <button
+                onclick={() => { shareTab = 'tracks'; showShare = true; }}
+                title="Compartilhar nos Stories"
+                style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:8px;
+                       color:#5a5a78;font-size:13px;line-height:1;transition:color .15s"
+                onmouseenter={(e) => e.currentTarget.style.color='#7c6af5'}
+                onmouseleave={(e) => e.currentTarget.style.color='#5a5a78'}
+              >⬆ Story</button>
+            </div>
             {#each (metrics.topTracks ?? []).slice(0,10) as t, i}
               <div class="list-row flex items-center gap-3 py-2">
                 <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
@@ -312,20 +388,43 @@
             {/each}
           </div>
 
-          <!-- Top Genres -->
-          <div>
-            <div class="text-2xs font-semibold mb-3 uppercase tracking-wider" style="color:#5a5a78">Gêneros</div>
-            {#each (metrics.topGenres ?? []).slice(0,10) as g, i}
-              <div class="list-row flex items-center gap-3 py-2">
-                <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
-                <span class="text-sm flex-1 truncate text-white">{g.genre ?? g.title ?? g.name ?? '?'}</span>
-                <div class="text-right shrink-0">
-                  <div class="text-2xs stat-value" style="color:#5a5a78">{fmt(g.playCount ?? 0)} plays</div>
-                  {#if g.trackCount}<div class="text-2xs" style="color:#3a3a58">{g.trackCount} faixas</div>{/if}
-                </div>
+          <!-- Top Genres (analysis-based when available, fallback to Plex tags) -->
+          {#if metrics.topAnalysisGenres?.length >= 3}
+            {@const genreSource = metrics.topAnalysisGenres}
+            <div>
+              <div class="flex items-center gap-2 mb-3">
+                <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Gêneros</div>
+                <span class="text-2xs px-1.5 py-px rounded" style="background:rgba(29,185,84,0.1);color:#1db954;border:1px solid rgba(29,185,84,0.2)">da análise</span>
               </div>
-            {/each}
-          </div>
+              {#each genreSource.slice(0,10) as g, i}
+                <div class="list-row flex items-center gap-3 py-2">
+                  <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
+                  <span class="text-sm flex-1 truncate text-white">{g.genre ?? g.title ?? g.name ?? '?'}</span>
+                  <div class="text-right shrink-0">
+                    <div class="text-2xs stat-value" style="color:#5a5a78">{fmt(g.playCount ?? 0)} plays</div>
+                    {#if g.trackCount}<div class="text-2xs" style="color:#3a3a58">{g.trackCount} faixas</div>{/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div>
+              <div class="flex items-center gap-2 mb-3">
+                <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Gêneros</div>
+                <span class="text-2xs px-1.5 py-px rounded" style="color:#3a3a58;border:1px solid #1e1e2e">Plex tags</span>
+              </div>
+              {#each (metrics.topGenres ?? []).slice(0,10) as g, i}
+                <div class="list-row flex items-center gap-3 py-2">
+                  <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
+                  <span class="text-sm flex-1 truncate text-white">{g.genre ?? g.title ?? g.name ?? '?'}</span>
+                  <div class="text-right shrink-0">
+                    <div class="text-2xs stat-value" style="color:#5a5a78">{fmt(g.playCount ?? 0)} plays</div>
+                    {#if g.trackCount}<div class="text-2xs" style="color:#3a3a58">{g.trackCount} faixas</div>{/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
 
         </div>
       {:else}
@@ -418,27 +517,71 @@
   {#if !loadingDisc && discoveries.length > 0}
     <SectionBox noPad title="Descobertas">
       {#snippet actions()}
-        <span class="text-2xs" style="color:#5a5a78">Analisadas · ainda não ouvidas</span>
+        <span class="text-2xs" style="color:#5a5a78">Mais energéticas · ainda não ouvidas</span>
       {/snippet}
 
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 px-5 pt-1 pb-5">
         {#each discoveries as t}
-          <div class="rounded-xl p-3 border transition-all duration-150 hover:border-accent/25 group"
+          <div class="rounded-xl p-3 border transition-all duration-150 hover:border-accent/25"
                style="background:#16161f;border-color:#1e1e2e">
             <div class="text-sm font-medium text-white truncate leading-snug">{t.title ?? '—'}</div>
             <div class="text-2xs truncate mt-0.5" style="color:#5a5a78">{t.artist ?? ''}</div>
-            {#if t.energy != null}
-              <div class="mt-2">
+            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+              {#if t.energy != null}
                 <span class="text-2xs font-semibold px-1.5 py-px rounded"
-                      style="background:rgba(124,106,245,0.1);color:#9d8eff">
-                  ⚡ {(+t.energy).toFixed(1)}
-                </span>
-              </div>
-            {/if}
+                      style="background:rgba(124,106,245,0.1);color:#9d8eff">⚡ {(+t.energy).toFixed(0)}</span>
+              {/if}
+              {#if t.subgenre}
+                <span class="text-2xs px-1.5 py-px rounded truncate"
+                      style="background:rgba(56,189,248,0.08);color:#38bdf8;max-width:100%">{t.subgenre}</span>
+              {/if}
+            </div>
           </div>
         {/each}
       </div>
     </SectionBox>
   {/if}
 
+  <!-- ── Mapa de Subgêneros (do cache de análise) ─────────── -->
+  {#if subgenreDistrib.length >= 3}
+    <SectionBox noPad title="Mapa de Subgêneros">
+      {#snippet actions()}
+        <span class="text-2xs" style="color:#5a5a78">Distribuição do cache de análise</span>
+      {/snippet}
+      <div class="px-5 pt-2 pb-5">
+        <div class="space-y-2">
+          {#each subgenreDistrib as sg, i}
+            {@const maxCount = subgenreDistrib[0]?.count ?? 1}
+            {@const barPct = Math.round(sg.count / maxCount * 100)}
+            {@const barColor = i === 0 ? '#7c6af5' : i === 1 ? '#1db954' : i === 2 ? '#38bdf8' : i < 5 ? '#f59e0b' : '#3a3a58'}
+            <div class="flex items-center gap-3">
+              <div class="text-2xs text-right shrink-0" style="width:3.5rem;color:#5a5a78">{sg.pct}%</div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-xs text-white truncate" style="max-width:70%">{sg.name}</span>
+                  <span class="text-2xs" style="color:#5a5a78">{sg.count} faixas</span>
+                </div>
+                <div class="h-1 rounded-full" style="background:#1c1c28">
+                  <div class="h-1 rounded-full transition-all duration-500"
+                       style="width:{barPct}%;background:{barColor};box-shadow:0 0 4px {barColor}55"></div>
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    </SectionBox>
+  {/if}
+
 </div>
+
+<!-- ── Modal de Stories ─────────────────────────────────── -->
+<ShareStoryModal
+  bind:show={showShare}
+  initTab={shareTab}
+  artists={metrics?.topArtists ?? []}
+  tracks={metrics?.topTracks ?? []}
+  curiosidades={curiosidades}
+  summary={metrics?.summary ?? null}
+  period={period}
+/>

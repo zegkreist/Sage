@@ -260,11 +260,40 @@ export function libraryRouter(router, { libraryScanner, historyService, metricsS
       const acousticPct = Math.round(acoustic / n * 100);
       facts.push({ icon: "🎸", type: "pct", label: "Faixas acústicas", value: `${acousticPct}%`, pct: acousticPct, sub: "são predominantemente acústicas" });
 
-      // Gênero mais comum
-      const genreMap = {};
-      for (const e of entries) if (e.analysis.genre) genreMap[e.analysis.genre] = (genreMap[e.analysis.genre] || 0) + 1;
-      const topGenre = Object.entries(genreMap).sort((a, b) => b[1] - a[1])[0];
-      if (topGenre) facts.push({ icon: "🎵", type: "stat", label: "Gênero dominante", value: topGenre[0], sub: `${topGenre[1]} faixas analisadas` });
+      // Gênero mais comum (usa subgênero quando disponível — mais específico)
+      const subgenreMap = {};
+      const broadGenreMap = {};
+      for (const e of entries) {
+        const sg = e.analysis.subgenre;
+        const g  = e.analysis.genre;
+        // subgenre: só usa se não for genérico demais
+        const useSubgenre = sg && sg !== "unknown" && sg.toLowerCase() !== (g || "").toLowerCase();
+        if (useSubgenre) subgenreMap[sg] = (subgenreMap[sg] || 0) + 1;
+        if (g && g !== "unknown") broadGenreMap[g] = (broadGenreMap[g] || 0) + 1;
+      }
+      // Top 5 subgêneros da análise
+      const topSubgenres = Object.entries(subgenreMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => ({ name, count }));
+      if (topSubgenres.length >= 2) {
+        facts.push({
+          icon: "🎸", type: "list",
+          label: "Subgêneros da Análise",
+          items: topSubgenres,
+          sub: `${Object.keys(subgenreMap).length} subgêneros distintos`,
+        });
+      } else {
+        // Fallback para gênero largo se não há subgêneros suficientes
+        const topGenre = Object.entries(broadGenreMap).sort((a, b) => b[1] - a[1])[0];
+        if (topGenre) facts.push({ icon: "🎵", type: "stat", label: "Gênero dominante", value: topGenre[0], sub: `${topGenre[1]} faixas analisadas` });
+      }
+
+      // Diversidade: número de subgêneros únicos
+      const genreDiversity = Object.keys(subgenreMap).length || Object.keys(broadGenreMap).length;
+      if (genreDiversity > 0) {
+        facts.push({ icon: "🌈", type: "stat", label: "Diversidade de gêneros", value: String(genreDiversity), sub: "subgêneros únicos na análise" });
+      }
 
       // Mood mais frequente
       const moodMap = {};

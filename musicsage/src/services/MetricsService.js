@@ -9,11 +9,12 @@
  * O playCount exibido é o viewCount total do Plex (acumulado, não restrito ao período).
  */
 export class MetricsService {
-  constructor({ axios, plexUrl, plexToken } = {}) {
-    this.axios     = axios;
-    this.plexUrl   = plexUrl   || process.env.PLEX_URL   || "http://localhost:32400";
-    this.plexToken = plexToken || process.env.PLEX_TOKEN || "";
-    this._musicKey = null;
+  constructor({ axios, plexUrl, plexToken, analysisCache } = {}) {
+    this.axios         = axios;
+    this.plexUrl       = plexUrl   || process.env.PLEX_URL   || "http://localhost:32400";
+    this.plexToken     = plexToken || process.env.PLEX_TOKEN || "";
+    this.analysisCache = analysisCache || null;
+    this._musicKey     = null;
   }
 
   get _headers() {
@@ -75,20 +76,26 @@ export class MetricsService {
     const artistMap  = Object.fromEntries(artistMeta.map((a) => [a.title, a]));
 
     // Agregação
-    const trackMap  = {};
-    const artistAgg = {};
-    const genreAgg  = {};
+    const trackMap         = {};
+    const artistAgg        = {};
+    const artistSubgenres  = {};  // artistKey → { genre: count }   (chave = grandparentRatingKey ou nome)
+    const artistSgMap      = {};  // artistKey → { subgenre: count }
+    const genreAgg         = {};
+    const analysisGenreAgg = {};
 
     for (const t of tracks) {
       const plays      = t.viewCount || 0;
       if (plays === 0) continue;
       const durationMs = t.duration  || 0;
       const artistName = t.grandparentTitle || "?";
+      // grandparentRatingKey é único por entidade-artista no Plex → evita colisão de nomes iguais
+      const artistKey  = t.grandparentRatingKey ? String(t.grandparentRatingKey) : artistName;
       const artObj     = artistMap[artistName];
 
       // Faixa (deduplica por ratingKey)
       if (!trackMap[t.ratingKey]) {
         trackMap[t.ratingKey] = {
+          ratingKey:    t.ratingKey,
           title:        t.title,
           artist:       artistName,
           album:        t.parentTitle || "",
@@ -100,8 +107,9 @@ export class MetricsService {
       }
 
       // Artista
-      if (!artistAgg[artistName]) {
-        artistAgg[artistName] = {
+      if (!artistAgg[artistKey]) {
+        artistAgg[artistKey] = {
+          artistKey,
           artist:    artistName,
           playCount: 0,
           totalMs:   0,
@@ -109,14 +117,40 @@ export class MetricsService {
           genres:    (artObj?.Genre || []).map((g) => g.tag),
         };
       }
-      artistAgg[artistName].playCount += plays;
-      artistAgg[artistName].totalMs   += plays * durationMs;
+      artistAgg[artistKey].playCount += plays;
+      artistAgg[artistKey].totalMs   += plays * durationMs;
 
-      // Gêneros (via artista)
+      // Gêneros (via artista — tags Plex)
       for (const genre of (artObj?.Genre || []).map((g) => g.tag)) {
         if (!genreAgg[genre]) genreAgg[genre] = { genre, playCount: 0, trackCount: 0 };
         genreAgg[genre].playCount  += plays;
         genreAgg[genre].trackCount += 1;
+      }
+
+      // Gêneros de análise (subgenre da IA — mais específico que a tag Plex)
+      if (this.analysisCache) {
+        const cached = this.analysisCache.get(String(t.ratingKey));
+        const sg = cached?.analysis?.subgenre;
+        const bg = cached?.analysis?.genre;
+        const useSubgenre = sg && sg !== "unknown" && sg.toLowerCase() !== (bg ?? "").toLowerCase();
+        // Para o ranking de gêneros: prefere subgênero (mais granular)
+        const agKey = useSubgenre ? sg : (bg && bg !== "unknown" ? bg : null);
+        if (agKey) {
+          if (!analysisGenreAgg[agKey]) analysisGenreAgg[agKey] = { genre: agKey, playCount: 0, trackCount: 0 };
+          analysisGenreAgg[agKey].playCount  += plays;
+          analysisGenreAgg[agKey].trackCount += 1;
+        }
+        // Para o label do artista: usa genre amplo (mais confiável como rótulo)
+        const artistGenreKey = (bg && bg !== "unknown") ? bg : (sg && sg !== "unknown" ? sg : null);
+        if (artistGenreKey) {
+          if (!artistSubgenres[artistKey]) artistSubgenres[artistKey] = {};
+          artistSubgenres[artistKey][artistGenreKey] = (artistSubgenres[artistKey][artistGenreKey] || 0) + 1;
+        }
+        // Acumula subgênero separadamente (para o formato genre/subgenre)
+        if (sg && sg !== "unknown") {
+          if (!artistSgMap[artistKey]) artistSgMap[artistKey] = {};
+          artistSgMap[artistKey][sg] = (artistSgMap[artistKey][sg] || 0) + 1;
+        }
       }
     }
 
@@ -128,20 +162,48 @@ export class MetricsService {
     const topTracks = Object.values(trackMap)
       .sort((a, b) => b.playCount - a.playCount)
       .slice(0, 20)
-      .map(({ durationMs, ...t }) => ({
-        ...t,
-        totalMinutes: Math.round((durationMs * t.playCount) / 60000),
-      }));
+      .map(({ durationMs, ratingKey, ...t }) => {
+        const cached = this.analysisCache?.get(String(ratingKey));
+        const sg = cached?.analysis?.subgenre;
+        const bg = cached?.analysis?.genre;
+        const useSubgenre = sg && sg !== "unknown" && sg.toLowerCase() !== (bg ?? "").toLowerCase();
+        const agKey = useSubgenre ? sg : (bg && bg !== "unknown" ? bg : null);
+        return {
+          ...t,
+          totalMinutes:  Math.round((durationMs * t.playCount) / 60000),
+          analysisGenre: agKey ?? null,
+        };
+      });
 
     const topArtists = Object.values(artistAgg)
       .sort((a, b) => b.playCount - a.playCount)
       .slice(0, 20)
-      .map(({ totalMs: ms, ...a }) => ({
-        ...a,
-        totalMinutes: Math.round(ms / 60000),
-      }));
+      .map(({ totalMs: ms, artistKey: ak, ...a }) => {
+        // Combina como 'genre/subgenre' quando subgênero difere do genre
+        const sgCounts  = artistSubgenres[ak];
+        const topGenre  = sgCounts
+          ? Object.entries(sgCounts).sort((x, y) => y[1] - x[1])[0]?.[0]
+          : null;
+        const sgDetail  = artistSgMap[ak];
+        const topSg     = sgDetail
+          ? Object.entries(sgDetail).sort((x, y) => y[1] - x[1])[0]?.[0]
+          : null;
+        const isDiff    = topSg && topGenre && topSg.toLowerCase() !== topGenre.toLowerCase();
+        const label     = topGenre
+          ? (isDiff ? `${topGenre}/${topSg}` : topGenre)
+          : (topSg ?? null);
+        return {
+          ...a,
+          totalMinutes:   Math.round(ms / 60000),
+          analysisGenre:  label,
+        };
+      });
 
     const topGenres = Object.values(genreAgg)
+      .sort((a, b) => b.playCount - a.playCount)
+      .slice(0, 15);
+
+    const topAnalysisGenres = Object.values(analysisGenreAgg)
       .sort((a, b) => b.playCount - a.playCount)
       .slice(0, 15);
 
@@ -157,6 +219,7 @@ export class MetricsService {
       topTracks,
       topArtists,
       topGenres,
+      topAnalysisGenres,
     };
   }
 

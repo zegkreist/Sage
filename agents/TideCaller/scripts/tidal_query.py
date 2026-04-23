@@ -22,13 +22,13 @@ SCRIPT_DIR  = Path(__file__).parent.absolute()
 AGENT_DIR   = SCRIPT_DIR.parent
 CONFIG_TOML = AGENT_DIR / "config" / ".config" / "streamrip" / "config.toml"
 
-# Qualidade alvo para Tidal: 1 = HIGH (320kbps AAC) — funciona em qualquer plano
+# Qualidade alvo para Tidal: 3 = HiFi (FLAC) — requer plano HiFi ou superior
 _TARGET_TIDAL_QUALITY = 3
 
 
 def _patch_config_quality():
     """
-    Garante que o config.toml do streamrip tem quality=1 para Tidal.
+    Garante que o config.toml do streamrip tem quality=3 para Tidal.
     NÃO altera o campo version — deixar o rip gerenciar isso normalmente.
     """
     if not CONFIG_TOML.exists():

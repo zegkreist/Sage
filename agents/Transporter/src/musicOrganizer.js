@@ -109,14 +109,18 @@ export class MusicOrganizer {
               const resolvedYear = info.year || yearFromSub || (subArtistIsYear ? info.artist : null);
               await this._moveRelease(subsubPath, resolvedArtist, info.album, resolvedYear, prefix);
             }
-            if (!this.dryRun) removeIfEmpty(subPath);
+            if (!this.dryRun) fs.rmSync(subPath, { recursive: true, force: true });
           }
         }
         if (!this.dryRun) {
-          removeIfEmpty(itemPath);
           // Ainda existe e só tem imagens? Pasta residual de execução anterior
           if (fs.existsSync(itemPath)) {
             this._cleanResidualFolder(itemPath, item, prefix);
+          }
+          // Forçar remoção se não sobrou nenhum áudio
+          if (fs.existsSync(itemPath) && !this._hasAnyAudio(itemPath)) {
+            fs.rmSync(itemPath, { recursive: true, force: true });
+            console.log(`${prefix}🗑️  ${item}  (pasta limpa após organização)`);
           }
         }
       }
@@ -210,8 +214,8 @@ export class MusicOrganizer {
         if (fs.statSync(subp).isDirectory()) this._removeLitterFiles(subp);
       }
 
-      // Remover pasta de origem (agora vazia)
-      removeIfEmpty(releaseDir);
+      // Remover pasta de origem (forçado — áudio já foi movido)
+      fs.rmSync(releaseDir, { recursive: true, force: true });
     }
 
     if (count > 0) {
@@ -300,6 +304,20 @@ export class MusicOrganizer {
    * que ficam quando o torrent ou streamrip inclui arquivos extras.
    * @private
    */
+  /**
+   * Verifica se existe algum arquivo de áudio em qualquer nível da pasta.
+   * @private
+   */
+  _hasAnyAudio(dir) {
+    const AUDIO_EXT = new Set([".mp3", ".flac", ".opus", ".m4a", ".ogg", ".wav", ".aac", ".wma"]);
+    if (!fs.existsSync(dir)) return false;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory() && this._hasAnyAudio(path.join(dir, entry.name))) return true;
+      if (AUDIO_EXT.has(path.extname(entry.name).toLowerCase())) return true;
+    }
+    return false;
+  }
+
   _removeLitterFiles(dir) {
     const LITTER_EXT = new Set([".nfo", ".log", ".cue", ".m3u", ".m3u8", ".sfv",
                                   ".txt", ".pdf", ".accurip", ".md5"]);

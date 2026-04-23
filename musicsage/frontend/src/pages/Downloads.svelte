@@ -52,6 +52,24 @@
   let sbResults     = $state([]);
   let sbLoading     = $state(false);
   let sbError       = $state('');
+  let sbSort        = $state({ col: 'seeders', dir: 'desc' });
+
+  const sbSorted = $derived(() => {
+    const dir = sbSort.dir === 'asc' ? 1 : -1;
+    return [...sbResults].sort((a, b) => {
+      if (sbSort.col === 'seeders') {
+        return ((a.seeders ?? a.seeds ?? 0) - (b.seeders ?? b.seeds ?? 0)) * dir;
+      } else if (sbSort.col === 'size') {
+        const sa = parseFloat(a.size) || 0;
+        const sb = parseFloat(b.size) || 0;
+        return (sa - sb) * dir;
+      } else {
+        const ta = (a.title ?? a.name ?? '').toLowerCase();
+        const tb = (b.title ?? b.name ?? '').toLowerCase();
+        return ta < tb ? -dir : ta > tb ? dir : 0;
+      }
+    });
+  });
 
   // query genérica para filme/série
   let sbQuery       = $state('');
@@ -543,18 +561,18 @@
         {#if sbLoading}
           <div class="flex items-center gap-2 py-4"><Spinner size="sm" /><span class="text-2xs" style="color:#5a5a78">Buscando…</span></div>
         {:else if sbResults.length > 0}
-          <div class="overflow-x-auto rounded-xl border" style="border-color:#1a1a28">
+          <div class="overflow-x-auto rounded-xl border" style="border-color:#1a1a28;max-height:420px;overflow-y:auto">
             <table class="w-full text-sm">
-              <thead>
+              <thead style="position:sticky;top:0;background:#111118;z-index:1">
                 <tr class="border-b" style="border-color:#1a1a28">
-                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Nome</th>
-                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Tamanho</th>
-                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Seeds</th>
+                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider cursor-pointer select-none" style="color:#5a5a78" onclick={() => { sbSort = sbSort.col === 'title' ? { col: 'title', dir: sbSort.dir === 'asc' ? 'desc' : 'asc' } : { col: 'title', dir: 'asc' }; }}>Nome {sbSort.col === 'title' ? (sbSort.dir === 'asc' ? '↑' : '↓') : ''}</th>
+                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider cursor-pointer select-none" style="color:#5a5a78" onclick={() => { sbSort = sbSort.col === 'size' ? { col: 'size', dir: sbSort.dir === 'asc' ? 'desc' : 'asc' } : { col: 'size', dir: 'desc' }; }}>Tamanho {sbSort.col === 'size' ? (sbSort.dir === 'asc' ? '↑' : '↓') : ''}</th>
+                  <th class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider cursor-pointer select-none" style="color:#5a5a78" onclick={() => { sbSort = sbSort.col === 'seeders' ? { col: 'seeders', dir: sbSort.dir === 'asc' ? 'desc' : 'asc' } : { col: 'seeders', dir: 'desc' }; }}>Seeds {sbSort.col === 'seeders' ? (sbSort.dir === 'asc' ? '↑' : '↓') : ''}</th>
                   <th class="py-2.5 px-3"></th>
                 </tr>
               </thead>
               <tbody>
-                {#each sbResults as r}
+                {#each sbSorted() as r}
                   <tr class="list-row">
                     <td class="py-2.5 px-3 text-white max-w-xs truncate">{r.title ?? r.name ?? '?'}</td>
                     <td class="py-2.5 px-3 whitespace-nowrap text-2xs" style="color:#5a5a78">{r.size || '?'}</td>

@@ -330,17 +330,22 @@ class DownloadManager extends EventEmitter {
   removeTorrent(infoHash, deleteFiles = false) {
     const torrentInfo = this.activeTorrents.get(infoHash);
     if (torrentInfo && torrentInfo.torrent) {
-      torrentInfo.torrent.destroy({ destroyStore: deleteFiles })
-        .then(() => {
-          this.activeTorrents.delete(infoHash);
-          this.emit("removed", infoHash);
-          this._log("info", `Torrent removido: ${torrentInfo.name || infoHash}`);
-        })
-        .catch((err) => {
-          this._log("warn", `Erro ao remover torrent ${infoHash}: ${err.message}`);
-          // Remove da memória mesmo se destroy falhar
-          this.activeTorrents.delete(infoHash);
-        });
+      const result = torrentInfo.torrent.destroy({ destroyStore: deleteFiles });
+      const cleanup = () => {
+        this.activeTorrents.delete(infoHash);
+        this.emit("removed", infoHash);
+        this._log("info", `Torrent removido: ${torrentInfo.name || infoHash}`);
+      };
+      const onErr = (err) => {
+        this._log("warn", `Erro ao remover torrent ${infoHash}: ${err?.message ?? err}`);
+        // Remove da memória mesmo se destroy falhar
+        this.activeTorrents.delete(infoHash);
+      };
+      if (result && typeof result.then === 'function') {
+        result.then(cleanup).catch(onErr);
+      } else {
+        cleanup();
+      }
     } else {
       // Não está ativo em memória — remove só do estado salvo
       this.activeTorrents.delete(infoHash);

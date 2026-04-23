@@ -292,6 +292,123 @@ export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer,
     }
   });
 
+  // ─── POST /api/audio/reanalyze-artist ────────────────────────────────────
+  /**
+   * Limpa análises de todas as faixas de um artista específico e as refaz.
+   * Reutiliza o estado batchJob para que o frontend possa acompanhar via
+   * GET /api/audio/batch-progress.
+   *
+   * Body:
+   *   artist        {string}  — nome do artista (case-insensitive)
+   *   maxAudioSecs  {number?} — duração do trecho de áudio (padrão: 30)
+   *   concurrency   {number?} — análises paralelas (padrão: 1, máx: 3)
+   */
+  router.post("/audio/reanalyze-artist", async (req, res) => {
+    if (!analyzer || !libraryScanner || !analysisCache) {
+      return res.status(503).json({ error: "analyzer, libraryScanner ou analysisCache não disponível" });
+    }
+
+    if (batchJob.running) {
+      return res.status(409).json({ error: "Análise em lote já está em andamento — aguarde ou cancele antes." });
+    }
+
+    const { artist, maxAudioSecs = 30, concurrency = 1 } = req.body ?? {};
+
+    if (!artist || typeof artist !== "string" || !artist.trim()) {
+      return res.status(400).json({ error: "Campo 'artist' obrigatório" });
+    }
+
+    const artistName = artist.trim();
+
+    // Responde imediatamente
+    res.json({ message: `Reanálise de "${artistName}" iniciada`, status: "running" });
+
+    (async () => {
+      batchJob.running   = true;
+      batchJob.aborted   = false;
+      batchJob.done      = 0;
+      batchJob.failed    = 0;
+      batchJob.current   = '';
+      batchJob.startedAt = new Date().toISOString();
+
+      try {
+        await analysisCache.load();
+        const { tracks } = await libraryScanner.scan();
+
+        const normalize = (s) => (s || "").toLowerCase().trim();
+        const todo = tracks.filter(
+          (t) => normalize(t.grandparentTitle) === normalize(artistName)
+        );
+
+        if (todo.length === 0) {
+          logger.warn("AUDIO_REANALYZE", `Nenhuma faixa encontrada para "${artistName}"`);
+          batchJob.total = 0;
+          return;
+        }
+
+        // Remove entradas antigas do cache para forçar reanálise
+        let removed = 0;
+        for (const t of todo) {
+          if (analysisCache.has(String(t.ratingKey))) {
+            analysisCache.delete(String(t.ratingKey));
+            removed++;
+          }
+        }
+        logger.info("AUDIO_REANALYZE", `"${artistName}": ${todo.length} faixas, ${removed} entradas removidas`);
+
+        batchJob.total = todo.length;
+        const cap = Math.min(Math.max(1, concurrency), 3);
+        let idx = 0;
+
+        async function worker() {
+          while (idx < todo.length && !batchJob.aborted) {
+            const track    = todo[idx++];
+            const ratingKey = String(track.ratingKey);
+            const plexPath  = track.Media?.[0]?.Part?.[0]?.file;
+
+            if (!plexPath) {
+              batchJob.failed++;
+              logger.warn("AUDIO_REANALYZE", `Sem filePath para faixa ${ratingKey}`);
+              continue;
+            }
+
+            const filePath = audioAnalyzer ? audioAnalyzer._resolvePath(plexPath) : plexPath;
+            if (!existsSync(filePath)) {
+              batchJob.failed++;
+              logger.warn("AUDIO_REANALYZE", `Arquivo não encontrado: ${filePath}`);
+              continue;
+            }
+
+            try {
+              const meta = {
+                title:  track.title,
+                artist: track.grandparentTitle,
+                album:  track.parentTitle,
+              };
+              const analysis = await analyzer.analyzeAudioFile(filePath, meta, { maxAudioSecs });
+              analysisCache.set(ratingKey, { ...meta, filePath }, analysis);
+              batchJob.done++;
+              batchJob.current = `${meta.artist} – ${meta.title}`;
+              logger.info("AUDIO_REANALYZE", `[${batchJob.done}/${batchJob.total}] ✓ ${meta.artist} – ${meta.title}`);
+            } catch (err) {
+              batchJob.failed++;
+              logger.warn("AUDIO_REANALYZE", `Falha ratingKey=${ratingKey}: ${err.message}`);
+            }
+          }
+        }
+
+        await Promise.all(Array.from({ length: cap }, worker));
+        await analysisCache.flush();
+        logger.info("AUDIO_REANALYZE", `Concluído "${artistName}" — ${batchJob.done} ok, ${batchJob.failed} falharam`);
+      } catch (err) {
+        logger.error("AUDIO_REANALYZE", `Erro geral: ${err.message}`);
+      } finally {
+        batchJob.running = false;
+        batchJob.current = '';
+      }
+    })();
+  });
+
   // ─── DELETE /api/audio/analysis-cache ────────────────────────────────────
 
   router.delete("/audio/analysis-cache", async (_req, res) => {

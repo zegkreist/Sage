@@ -65,6 +65,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip3 install --no-cache-dir --break-system-packages \
         tidalapi \
         streamrip \
+    && sed -i 's/except TypeError as e:/except Exception as e:/' \
+        $(python3 -c "import site; print(site.getsitepackages()[0])")/streamrip/client/tidal.py \
     && apt-get remove -y gcc python3-dev libffi-dev libssl-dev cargo \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip /root/.cargo

@@ -103,6 +103,25 @@
     } catch (e) { toast.error(e.message); }
   }
 
+  // ─── Reanalisar artista ───────────────────────────────────────────────────
+  let reanalyzeArtist = $state('');
+  let reanalyzeErr    = $state('');
+
+  async function reanalyzeByArtist() {
+    if (!reanalyzeArtist.trim()) return;
+    reanalyzeErr = '';
+    try {
+      await api('POST', '/audio/reanalyze-artist', {
+        artist:       reanalyzeArtist.trim(),
+        maxAudioSecs: maxSecs,
+      });
+      toast.info(`Reanálise de "${reanalyzeArtist.trim()}" iniciada…`);
+      if (!progress) progress = { running: true, total: 0, processed: 0, done: 0, failed: 0, pct: 0, current: '' };
+      startPolling();
+      await loadProgress();
+    } catch (e) { reanalyzeErr = e.message; }
+  }
+
   const pct = $derived(
     progress?.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
   );
@@ -194,6 +213,37 @@
         <Button variant="secondary" onclick={loadCacheStats} loading={loadingCache}>↻ Atualizar</Button>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Reanalisar artista -->
+  <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
+    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="text-sm font-semibold text-white">Reanalisar Artista</div>
+      <p class="text-2xs mt-0.5" style="color:#5a5a78">Limpa as análises anteriores desse artista e refaz todas as faixas</p>
+    </div>
+    <div class="px-5 py-4 space-y-3">
+      {#if reanalyzeErr}
+        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+          {reanalyzeErr}<button class="ml-2 opacity-60" onclick={() => reanalyzeErr = ''}>✕</button>
+        </div>
+      {/if}
+      <div class="flex gap-2">
+        <input
+          type="text"
+          bind:value={reanalyzeArtist}
+          placeholder="Nome do artista…"
+          disabled={running}
+          class="flex-1 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none transition-colors disabled:opacity-40"
+          style="background:#16161f;border:1px solid #1e1e2e"
+          onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
+          onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
+          onkeydown={e => e.key === 'Enter' && !running && reanalyzeByArtist()}
+        />
+        <Button onclick={reanalyzeByArtist} disabled={running || !reanalyzeArtist.trim()}>
+          ↺ Reanalisar
+        </Button>
+      </div>
     </div>
   </div>
 
