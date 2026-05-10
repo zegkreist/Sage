@@ -372,7 +372,7 @@
                   style={idx === activeSugg
                     ? 'background:rgba(124,106,245,0.18);color:#e0e0f0'
                     : 'color:#c0c0d8;background:transparent'}
-                  onmousedown|preventDefault={() => selectSuggestion(s)}
+                  onmousedown={(e) => { e.preventDefault(); selectSuggestion(s); }}
                 >{s}</button>
               {/each}
             </div>
