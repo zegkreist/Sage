@@ -23,6 +23,7 @@ import { AnalysisCacheService } from "./src/services/AnalysisCacheService.js";
 import { RecommendationEngine } from "./src/services/RecommendationEngine.js";
 import { PlaylistBuilder } from "./src/services/PlaylistBuilder.js";
 import { LastFmService } from "./src/services/LastFmService.js";
+import { LyricsService } from "./src/services/LyricsService.js";
 import { createServer } from "./src/server.js";
 
 const PORT = parseInt(process.env.MUSICSAGE_PORT || "3001", 10);
@@ -70,6 +71,7 @@ const embeddingService  = new EmbeddingService({
 });
 
 const playlistBuilder = new PlaylistBuilder({ allfather, libraryScanner, embeddingService });
+const lyricsService   = new LyricsService({ audioAnalyzer });
 
 // Carrega cache de análises salvas anteriormente — await garante que o cache
 // está disponível antes do primeiro request chegar ao servidor
@@ -95,7 +97,7 @@ libraryScanner.scan().then((result) => {
 
 // ── Sobe o servidor ───────────────────────────────────────────────────────
 
-const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache });
+const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService });
 
 const server = app.listen(PORT);
 

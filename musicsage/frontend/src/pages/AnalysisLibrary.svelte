@@ -21,7 +21,7 @@
   let errorMsg     = $state('');
 
   onMount(async () => {
-    await Promise.allSettled([loadCacheStats(), loadProgress(), loadArtistSuggestions()]);
+    await Promise.allSettled([loadCacheStats(), loadProgress(), loadArtistSuggestions(), loadLyricsStats(), loadLyricsProgress()]);
   });
 
   async function loadCacheStats() {
@@ -135,6 +135,71 @@
   );
 
   const running = $derived(progress?.running === true);
+
+  // ─── Letras locais ────────────────────────────────────────────────────────
+  let lyricsStats      = $state(null);   // { withLyrics, withoutLyrics, total }
+  let lyricsProgress   = $state(null);   // { running, processed, total, pct, done, notFound, failed, skipped, current }
+  let loadingLyrics    = $state(false);
+  let lyricsOverwrite  = $state(false);
+  let lyricsPollId     = $state(null);
+  let lyricsErr        = $state('');
+
+  async function loadLyricsStats() {
+    loadingLyrics = true;
+    try {
+      lyricsStats = await api('GET', '/lyrics/stats');
+    } catch (e) { lyricsErr = e.message; }
+    finally { loadingLyrics = false; }
+  }
+
+  async function loadLyricsProgress() {
+    try {
+      lyricsProgress = await api('GET', '/lyrics/batch-progress');
+      if (lyricsProgress?.running && !lyricsPollId) startLyricsPolling();
+    } catch { /* não crítico */ }
+  }
+
+  function startLyricsPolling() {
+    if (lyricsPollId) return;
+    lyricsPollId = setInterval(async () => {
+      try {
+        lyricsProgress = await api('GET', '/lyrics/batch-progress');
+        if (!lyricsProgress?.running) {
+          stopLyricsPolling();
+          await loadLyricsStats();
+          toast.success('Letras concluídas!');
+        }
+      } catch { stopLyricsPolling(); }
+    }, 2000);
+  }
+
+  function stopLyricsPolling() {
+    clearInterval(lyricsPollId);
+    lyricsPollId = null;
+  }
+
+  async function startLyricsBatch() {
+    lyricsErr = '';
+    try {
+      await api('POST', '/lyrics/batch-fetch', { overwrite: lyricsOverwrite });
+      toast.info('Busca de letras iniciada…');
+      if (!lyricsProgress) lyricsProgress = { running: true, total: 0, processed: 0, done: 0, notFound: 0, failed: 0, skipped: 0, pct: 0, current: '' };
+      startLyricsPolling();
+      await loadLyricsProgress();
+    } catch (e) { lyricsErr = e.message; }
+  }
+
+  async function stopLyricsBatch() {
+    try {
+      await api('POST', '/lyrics/batch-fetch', { stop: true });
+      stopLyricsPolling();
+      lyricsProgress = await api('GET', '/lyrics/batch-progress');
+      toast.warn('Busca de letras interrompida');
+    } catch (e) { toast.error(e.message); }
+  }
+
+  const lyricsPct     = $derived(lyricsProgress?.pct ?? 0);
+  const lyricsRunning = $derived(lyricsProgress?.running === true);
 </script>
 
 <div class="p-6 w-full min-h-full animate-fade-in space-y-6">
@@ -258,6 +323,90 @@
           ↺ Reanalisar
         </Button>
       </div>
+    </div>
+  </div>
+
+  <!-- Letras locais -->
+  <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
+    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="text-sm font-semibold text-white">Letras Locais (LRC)</div>
+      <p class="text-2xs mt-0.5" style="color:#5a5a78">Baixa letras via LRCLIB e salva junto aos arquivos de áudio para o Plex exibir</p>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+
+      {#if lyricsErr}
+        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+          {lyricsErr}<button class="ml-2 opacity-60" onclick={() => lyricsErr = ''}>✕</button>
+        </div>
+      {/if}
+
+      <!-- Stats -->
+      {#if lyricsStats}
+        <div class="grid grid-cols-3 gap-3">
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
+            <div class="stat-value text-lg font-bold" style="color:#7c6af5">{lyricsStats.withLyrics}</div>
+            <div class="text-2xs mt-0.5" style="color:#5a5a78">Com letras</div>
+          </div>
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
+            <div class="stat-value text-lg font-bold text-white">{lyricsStats.withoutLyrics}</div>
+            <div class="text-2xs mt-0.5" style="color:#5a5a78">Sem letras</div>
+          </div>
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
+            <div class="stat-value text-lg font-bold" style="color:#1db954">
+              {lyricsStats.total > 0 ? ((lyricsStats.withLyrics / lyricsStats.total) * 100).toFixed(1) : '0.0'}%
+            </div>
+            <div class="text-2xs mt-0.5" style="color:#5a5a78">Cobertura</div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Opções -->
+      <div class="flex items-center">
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
+          <input type="checkbox" bind:checked={lyricsOverwrite} disabled={lyricsRunning} class="accent-[#7c6af5]" />
+          Sobrescrever letras existentes
+        </label>
+      </div>
+
+      <!-- Progresso -->
+      {#if lyricsProgress}
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-2xs" style="color:#5a5a78">
+              {lyricsRunning ? 'Buscando…' : 'Pausado'}
+              {#if lyricsProgress.current}<span class="text-white ml-1">{lyricsProgress.current}</span>{/if}
+            </span>
+            <span class="text-2xs stat-value" style="color:#5a5a78">
+              {lyricsProgress.processed ?? 0} / {lyricsProgress.total ?? '?'} · {lyricsPct}%
+            </span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:{lyricsPct}%;{lyricsRunning ? '' : 'background:#2e2e4a'}"></div>
+          </div>
+          {#if !lyricsRunning && lyricsProgress.total > 0}
+            <div class="flex gap-3 mt-2 text-2xs" style="color:#5a5a78">
+              <span style="color:#1db954">✓ {lyricsProgress.done} salvas</span>
+              <span>⊘ {lyricsProgress.notFound} não encontradas</span>
+              <span>↷ {lyricsProgress.skipped} puladas</span>
+              {#if lyricsProgress.failed > 0}<span style="color:#ef4444">✕ {lyricsProgress.failed} falhas</span>{/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Botões -->
+      <div class="flex gap-2">
+        {#if !lyricsRunning}
+          <Button onclick={startLyricsBatch}>♪ Buscar Letras</Button>
+        {:else}
+          <Button onclick={stopLyricsBatch} variant="danger">
+            <Spinner size="xs" />
+            Parar
+          </Button>
+        {/if}
+        <Button variant="secondary" onclick={loadLyricsStats} loading={loadingLyrics}>↻ Atualizar</Button>
+      </div>
+
     </div>
   </div>
 
