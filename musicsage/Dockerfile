@@ -96,8 +96,9 @@ COPY --from=frontend-builder /build/frontend/dist ./public
 COPY --from=agents-builder /agents/Stormbringer /agents/Stormbringer
 COPY agents/TideCaller/scripts  /agents/TideCaller/scripts
 COPY agents/TideCaller/setup    /agents/TideCaller/setup
-COPY agents/TideCaller/config   /agents/TideCaller/config
-# Atenção: o token OAuth do Tidal fica em /agents/TideCaller/config/.config
+# O diretório config/ é gitignored (contém o token OAuth do Tidal) e NÃO existe
+# no contexto de build — é criado vazio no RUN abaixo e populado por um volume
+# em runtime. Atenção: o token OAuth do Tidal fica em /agents/TideCaller/config/.config
 # Monte um volume ou passe via env para persistência: -v tidal-config:/agents/TideCaller/config
 
 # ── Aponta downloads do Stormbringer para o volume /downloads ─────────────────
@@ -110,6 +111,7 @@ RUN rm -rf /agents/Stormbringer/downloads \
                 /downloads/stormbringer/filmes \
                 /downloads/stormbringer/series \
                 /downloads/tidecaller \
+                /agents/TideCaller/config \
                 /data/logs /data/embeddings /data/playlists /data/streamrip \
                 /media/music /media/movies /media/series
 
