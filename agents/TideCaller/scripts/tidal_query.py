@@ -5,6 +5,7 @@ tidal_query.py — Bridge JSON para o MusicSage API.
 Comandos:
   python tidal_query.py search-artists QUERY        → JSON array de artistas
   python tidal_query.py list-albums    ARTIST_ID    → JSON array de álbuns
+  python tidal_query.py album-info     ALBUM_ID     → JSON com metadados do álbum
   python tidal_query.py download-albums ALBUM_ID... → baixa e imprime status JSON
 
 Saída sempre é JSON válido em stdout; erros como {"error": "..."} com exit 1.
@@ -208,6 +209,33 @@ def cmd_list_albums(artist_id: str):
     _out(out)
 
 
+def cmd_album_info(album_id: str):
+    """Metadados de um álbum avulso — usado no download por link do Tidal."""
+    import tidalapi
+    session = get_session()
+    try:
+        album = tidalapi.Album(session, album_id)
+        name = album.name
+    except Exception as e:
+        _err(f"Erro ao buscar álbum: {e}")
+
+    if not name:
+        _err(f"Álbum {album_id} não encontrado")
+
+    try:
+        artist = album.artist.name if album.artist else None
+    except Exception:
+        artist = None
+
+    _out({
+        "id":     album_id,
+        "name":   name,
+        "artist": artist,
+        "year":   _album_year(album),
+        "url":    f"https://tidal.com/browse/album/{album_id}",
+    })
+
+
 def _rip_major_version(rip_bin: str) -> int:
     """Retorna a versão major do rip (1 ou 2). Default 1 em caso de erro."""
     try:
@@ -317,6 +345,11 @@ def main():
         if not rest:
             _err("list-albums requer ARTIST_ID")
         cmd_list_albums(rest[0])
+
+    elif cmd == "album-info":
+        if not rest:
+            _err("album-info requer ALBUM_ID")
+        cmd_album_info(rest[0])
 
     elif cmd == "download-albums":
         if not rest:

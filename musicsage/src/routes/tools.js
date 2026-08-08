@@ -11,6 +11,7 @@
  *   POST /api/tools/stormbringer/download      — baixa torrent de música por magnet
  *   POST /api/tools/stormbringer/download/media — baixa torrent de filme/série por magnet
  *   POST /api/tools/tidecaller/download        — inicia download via TideCaller/streamrip
+ *   POST /api/tools/tidecaller/album/download-url — baixa um álbum por link do Tidal
  *   POST /api/tools/transporter/run            — move downloads para o Plex
  */
 import { randomUUID } from "crypto";
@@ -175,6 +176,103 @@ function tidalQuery(args, timeoutMs = 20000) {
       resolve(data);
     });
   });
+}
+
+/**
+ * Extrai o ID numérico de um link de álbum do Tidal.
+ * Aceita tidal.com/album/ID, tidal.com/browse/album/ID, listen.tidal.com/album/ID
+ * (com ou sem query string) e também um ID cru colado direto.
+ * Retorna null se não for um link de álbum.
+ */
+function parseTidalAlbumId(url) {
+  const s = String(url || "").trim();
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/tidal\.com\/(?:browse\/)?album\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Registra um job de download de álbuns e dispara o tidal_query.py em background,
+ * atualizando o job conforme as linhas JSON de progresso chegam.
+ * Compartilhado pelo download por artista e pelo download por link do Tidal.
+ */
+function startTidalAlbumJob(ids, albumMeta, artistName) {
+  const jobId = randomUUID();
+  const job = {
+    jobId,
+    artistName: artistName || null,
+    startedAt:  new Date().toISOString(),
+    finishedAt: null,
+    status: "running",
+    albums: ids.map(id => ({ id, name: albumMeta[id] || id, status: "pending" })),
+    lastError: null,
+  };
+  _tidalJobs.set(jobId, job);
+
+  const label = artistName ? `${artistName} (${ids.length} álbuns)` : `${ids.length} álbuns`;
+  logger.info("SERVER", `TideCaller download iniciado — jobId=${jobId} ${label}`);
+
+  const _tcDownloads = join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller");
+  const env = {
+    ...process.env,
+    XDG_CONFIG_HOME: join(TIDECALLER_DIR, "config", ".config"),
+    TIDECALLER_DOWNLOADS: _tcDownloads,
+  };
+  logger.info("SERVER", `TideCaller download dir: ${_tcDownloads}`);
+  const proc = spawn(TC_PYTHON, [TC_QUERY, "download-albums", ...ids], {
+    cwd: TIDECALLER_DIR, env, stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let buf = "";
+  proc.stdout.on("data", chunk => {
+    buf += chunk.toString();
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const parsed = JSON.parse(t);
+        if (parsed.albumId) {
+          const entry = job.albums.find(a => a.id === parsed.albumId);
+          if (entry) {
+            entry.status = parsed.ok ? "done" : "error";
+            if (parsed.error) entry.lastError = parsed.error;
+            const icon = parsed.ok ? "✓" : "✗";
+            const qualityNote = parsed.quality != null ? ` (q=${parsed.quality})` : "";
+            logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"${qualityNote}`);
+            if (!parsed.ok && parsed.error) logger.warn("SERVER", `TideCaller erro álbum ${parsed.albumId}: ${parsed.error}`);
+            if (parsed.ok && parsed.output)  logger.info("SERVER", `TideCaller saida álbum ${parsed.albumId}: ${parsed.output}`);
+          }
+        } else if (parsed.done) {
+          job.status = "done";
+        }
+      } catch { /* non-JSON line — ignore */ }
+    }
+  });
+  let _stderrBuf = "";
+  proc.stderr.on("data", chunk => { _stderrBuf += chunk.toString(); job.lastError = _stderrBuf.slice(-500); });
+  proc.on("close", code => {
+    job.finishedAt = new Date().toISOString();
+    // Albums still "pending" at close: mark as error (if they got no JSON status they didn't download)
+    job.albums.forEach(a => { if (a.status === "pending") a.status = "error"; });
+    const done  = job.albums.filter(a => a.status === "done").length;
+    const error = job.albums.filter(a => a.status === "error").length;
+    job.status = job.status === "running" ? (error === 0 && done > 0 ? "done" : "error") : job.status;
+    const icon  = job.status === "done" ? "✓" : "✗";
+    logger.info("SERVER", `TideCaller download ${icon} jobId=${jobId} ${label} — ok=${done} erros=${error} (código=${code})`);
+    if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);
+    // Limpar após 60 min
+    setTimeout(() => _tidalJobs.delete(jobId), 60 * 60 * 1000);
+  });
+  proc.on("error", err => {
+    job.status = "error";
+    job.finishedAt = new Date().toISOString();
+    job.lastError = err.message;
+    logger.error("SERVER", `TideCaller spawn error jobId=${jobId}: ${err.message}`);
+  });
+
+  return job;
 }
 
 /** Inicia processo detached (fire-and-forget). */
@@ -580,82 +678,38 @@ export function toolsRouter(router) {
     const ids = albums.map(a => String(a.id || a));
     const albumMeta = Object.fromEntries(albums.map(a => [String(a.id || a), a.name || a.id]));
 
-    const jobId = randomUUID();
-    const job = {
-      jobId,
-      artistName: artistName || null,
-      startedAt:  new Date().toISOString(),
-      finishedAt: null,
-      status: "running",
-      albums: ids.map(id => ({ id, name: albumMeta[id] || id, status: "pending" })),
-      lastError: null,
-    };
-    _tidalJobs.set(jobId, job);
+    const job = startTidalAlbumJob(ids, albumMeta, artistName);
+    res.json({ ok: true, jobId: job.jobId, status: "running", count: ids.length, albumIds: ids });
+  });
 
-    const label = artistName ? `${artistName} (${ids.length} álbuns)` : `${ids.length} álbuns`;
-    logger.info("SERVER", `TideCaller download iniciado — jobId=${jobId} ${label}`);
+  // ── POST /api/tools/tidecaller/album/download-url ────────────────────────
+  // Body: { url }  — baixa um álbum a partir de um link do Tidal
+  router.post("/tools/tidecaller/album/download-url", async (req, res) => {
+    const { url } = req.body || {};
+    if (!url?.trim()) return res.status(400).json({ error: "'url' é obrigatório" });
 
-    const _tcDownloads = join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller");
-    const env = {
-      ...process.env,
-      XDG_CONFIG_HOME: join(TIDECALLER_DIR, "config", ".config"),
-      TIDECALLER_DOWNLOADS: _tcDownloads,
-    };
-    logger.info("SERVER", `TideCaller download dir: ${_tcDownloads}`);
-    const proc = spawn(TC_PYTHON, [TC_QUERY, "download-albums", ...ids], {
-      cwd: TIDECALLER_DIR, env, stdio: ["ignore", "pipe", "pipe"],
-    });
+    const albumId = parseTidalAlbumId(url);
+    if (!albumId) {
+      return res.status(400).json({
+        error: "Link inválido — informe um link de álbum do Tidal (ex.: https://tidal.com/browse/album/12345678)",
+      });
+    }
 
-    let buf = "";
-    proc.stdout.on("data", chunk => {
-      buf += chunk.toString();
-      const lines = buf.split("\n");
-      buf = lines.pop();
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t) continue;
-        try {
-          const parsed = JSON.parse(t);
-          if (parsed.albumId) {
-            const entry = job.albums.find(a => a.id === parsed.albumId);
-            if (entry) {
-              entry.status = parsed.ok ? "done" : "error";
-              if (parsed.error) entry.lastError = parsed.error;
-              const icon = parsed.ok ? "✓" : "✗";
-              const qualityNote = parsed.quality != null ? ` (q=${parsed.quality})` : "";
-              logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"${qualityNote}`);
-              if (!parsed.ok && parsed.error) logger.warn("SERVER", `TideCaller erro álbum ${parsed.albumId}: ${parsed.error}`);
-              if (parsed.ok && parsed.output)  logger.info("SERVER", `TideCaller saida álbum ${parsed.albumId}: ${parsed.output}`);
-            }
-          } else if (parsed.done) {
-            job.status = "done";
-          }
-        } catch { /* non-JSON line — ignore */ }
-      }
-    });
-    let _stderrBuf = "";
-    proc.stderr.on("data", chunk => { _stderrBuf += chunk.toString(); job.lastError = _stderrBuf.slice(-500); });
-    proc.on("close", code => {
-      job.finishedAt = new Date().toISOString();
-      // Albums still "pending" at close: mark as error (if they got no JSON status they didn't download)
-      job.albums.forEach(a => { if (a.status === "pending") a.status = "error"; });
-      const done  = job.albums.filter(a => a.status === "done").length;
-      const error = job.albums.filter(a => a.status === "error").length;
-      job.status = job.status === "running" ? (error === 0 && done > 0 ? "done" : "error") : job.status;
-      const icon  = job.status === "done" ? "✓" : "✗";
-      logger.info("SERVER", `TideCaller download ${icon} jobId=${jobId} ${label} — ok=${done} erros=${error} (código=${code})`);
-      if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);
-      // Limpar após 60 min
-      setTimeout(() => _tidalJobs.delete(jobId), 60 * 60 * 1000);
-    });
-    proc.on("error", err => {
-      job.status = "error";
-      job.finishedAt = new Date().toISOString();
-      job.lastError = err.message;
-      logger.error("SERVER", `TideCaller spawn error jobId=${jobId}: ${err.message}`);
-    });
+    // Metadados são best-effort: o download roda pelo mesmo caminho do fluxo por
+    // artista (download-albums ID), então uma falha aqui só custa o nome bonito.
+    let name = `Álbum ${albumId}`;
+    let artistName = null;
+    try {
+      const info = await tidalQuery(["album-info", albumId]);
+      if (info?.name)   name       = info.name;
+      if (info?.artist) artistName = info.artist;
+    } catch (err) {
+      logger.warn("SERVER", `TideCaller album-info falhou para ${albumId}: ${err.message}`);
+    }
 
-    res.json({ ok: true, jobId, status: "running", count: ids.length, albumIds: ids });
+    const job = startTidalAlbumJob([albumId], { [albumId]: name }, artistName);
+    logger.info("SERVER", `TideCaller download por link — album=${albumId} "${name}"`);
+    res.json({ ok: true, jobId: job.jobId, status: "running", albumId, name, artistName });
   });
 
   // ── POST /api/tools/tidecaller/download ──────────────────────────────────
