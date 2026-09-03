@@ -266,7 +266,7 @@ Return a JSON object with these exact fields:
    * real em vez de apenas metadados — capturando timbre, dinâmica e instrumentação
    * de forma nativa.
    *
-   * Requer: ffmpeg instalado e modelo gemma4:e4b (ou compatível) no Ollama.
+   * Requer: ffmpeg instalado e modelo gemma4-256k:latest (ou compatível) no Ollama.
    *
    * @param {string} localPath           — caminho absoluto do arquivo de áudio
    * @param {object} [meta]              — metadados opcionais para enriquecer o prompt

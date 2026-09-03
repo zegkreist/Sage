@@ -14,6 +14,13 @@ const JACKETT_CAT = {
   music:  [3000],           // Audio
 };
 
+/** Mascara a API key nos logs (mostra só início/fim) sem nunca expor o valor completo. */
+function maskKey(key) {
+  if (!key) return "(vazia)";
+  if (key.length <= 8) return `****(len=${key.length})`;
+  return `${key.slice(0, 4)}...${key.slice(-4)} (len=${key.length})`;
+}
+
 class TorrentSearch {
   constructor() {
     this.api = TorrentSearchApi;
@@ -22,8 +29,15 @@ class TorrentSearch {
     this._log = (level, msg) => console.log(`[${level.toUpperCase()}] ${msg}`);
 
     // Jackett — URL via env, API key via env OU lida do ServerConfig.json do Jackett
-    this.jackettUrl    = (process.env.JACKETT_URL || "http://192.168.15.14:9117").replace(/\/$/, "");
-    this.jackettApiKey = process.env.JACKETT_API_KEY || this._readJackettApiKey();
+    this.jackettUrl = (process.env.JACKETT_URL || "http://192.168.15.14:9117").replace(/\/$/, "");
+    if (process.env.JACKETT_API_KEY) {
+      this.jackettApiKey = process.env.JACKETT_API_KEY;
+      this._log("info", `Jackett: URL=${this.jackettUrl} | API key vinda de JACKETT_API_KEY=${maskKey(this.jackettApiKey)}`);
+    } else {
+      this._log("info", `Jackett: URL=${this.jackettUrl} | JACKETT_API_KEY não definida, tentando ler ServerConfig.json...`);
+      this.jackettApiKey = this._readJackettApiKey();
+      this._log("info", `Jackett: resultado da leitura de ServerConfig.json → key=${maskKey(this.jackettApiKey)}`);
+    }
   }
 
   setLogger(fn) {
@@ -40,12 +54,13 @@ class TorrentSearch {
       "/ZimaOS-HD/AppData/flaresolverr/config/Jackett/ServerConfig.json",
       path.join(__dirname, "../../../../jackett/config/Jackett/ServerConfig.json"),
     ];
+    this._log("info", `Jackett: procurando ServerConfig.json em ${candidates.length} caminho(s) candidato(s): ${candidates.join(" | ")}`);
     for (const p of candidates) {
       try {
         const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
         const key = cfg.APIKey || cfg.ApiKey || cfg.apiKey || cfg.api_key;
         if (key) {
-          this._log("info", `Jackett API key lida de: ${p}`);
+          this._log("info", `Jackett API key lida de: ${p} (${maskKey(key)})`);
           return key;
         }
         this._log("warn", `Jackett: arquivo encontrado em ${p} mas sem campo APIKey. Campos: ${Object.keys(cfg).join(", ")}`);
@@ -64,7 +79,7 @@ class TorrentSearch {
     }
     const ok = !!(this.jackettUrl && this.jackettApiKey);
     if (!ok) {
-      this._log("warn", `Jackett NÃO disponível — url=${this.jackettUrl} key=${this.jackettApiKey ? '(set)' : '(empty)'}`);
+      this._log("warn", `Jackett NÃO disponível — url=${this.jackettUrl} key=${maskKey(this.jackettApiKey)} → usando fallback de scraper público`);
     }
     return ok;
   }
@@ -87,7 +102,9 @@ class TorrentSearch {
   async _jackettSearch(query, type) {
     const cats = (JACKETT_CAT[type] || []).join(",");
     const url  = `${this.jackettUrl}/api/v2.0/indexers/all/results`;
-    this._log("info", `Jackett buscando: query="${query}" cats=${cats || "all"}`);
+    const timeoutMs = 55_000;
+    const startedAt = Date.now();
+    this._log("info", `Jackett buscando: query="${query}" cats=${cats || "all"} url=${url} key=${maskKey(this.jackettApiKey)} timeout=${timeoutMs}ms`);
 
     let data;
     try {
@@ -98,15 +115,28 @@ class TorrentSearch {
           Category: cats || undefined,
           _:        Date.now(),
         },
-        timeout: 55_000,
+        timeout: timeoutMs,
       }));
     } catch (e) {
-      const detail = e.response?.status
-        ? `HTTP ${e.response.status}: ${JSON.stringify(e.response.data)}`
-        : (e.message || e.code || JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      const elapsed = Date.now() - startedAt;
+      let detail;
+      if (e.code === "ECONNABORTED" || e.message?.includes("timeout")) {
+        detail = `TIMEOUT após ${elapsed}ms (limite ${timeoutMs}ms) — algum indexer do Jackett está lento/travado; rode scripts/test-jackett.js --agg para achar qual`;
+      } else if (e.code === "ECONNREFUSED") {
+        detail = `CONEXÃO RECUSADA em ${elapsed}ms — Jackett não está de pé em ${this.jackettUrl}, ou porta/host errados`;
+      } else if (e.code === "ENOTFOUND" || e.code === "EAI_AGAIN") {
+        detail = `DNS/HOST não resolvido (${e.code}) em ${elapsed}ms — confira JACKETT_URL=${this.jackettUrl}`;
+      } else if (e.response?.status) {
+        detail = `HTTP ${e.response.status} em ${elapsed}ms: ${JSON.stringify(e.response.data)}`;
+      } else {
+        detail = `${e.message || e.code || JSON.stringify(e, Object.getOwnPropertyNames(e))} (${elapsed}ms)`;
+      }
+      this._log("error", `Jackett request failed: ${detail}`);
       throw new Error(`Jackett request failed: ${detail}`);
     }
 
+    const elapsed = Date.now() - startedAt;
+    this._log("info", `Jackett respondeu em ${elapsed}ms`);
     const items = data?.Results ?? [];
     const indexers = data?.Indexers ?? [];
     const activeIndexers = indexers.filter(i => i.Results > 0 || i.Status === 0).length;

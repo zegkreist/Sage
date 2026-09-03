@@ -62,7 +62,7 @@ docker build -f musicsage/Dockerfile -t musicsage:latest .
 | Variável | Obrigatória | Default | Descrição |
 |---|---|---|---|
 | `OLLAMA_URL` | — | `http://localhost:11434` | URL do servidor Ollama |
-| `OLLAMA_DEFAULT_MODEL` | — | `gemma4:e4b` | Modelo LLM para análise e chat |
+| `OLLAMA_DEFAULT_MODEL` | — | `gemma4-256k:latest` | Modelo LLM para análise e chat |
 | `EMBEDDING_MODEL` | — | `nomic-embed-text` | Modelo para geração de embeddings |
 
 ### Persistência
@@ -126,7 +126,7 @@ services:
       PLEX_TOKEN: "seu-token-aqui"
       PLEX_MEDIA_PATH: /media
       OLLAMA_URL: "http://192.168.1.100:11434"
-      OLLAMA_DEFAULT_MODEL: gemma4:e4b
+      OLLAMA_DEFAULT_MODEL: gemma4-256k:latest
       EMBEDDING_MODEL: nomic-embed-text
       LASTFM_API_KEY: "opcional"
     volumes:
@@ -221,7 +221,7 @@ docker run -d \
   -e PLEX_TOKEN="xxxxxxxxxxxxxxxxxx" \
   -e PLEX_MEDIA_PATH="/media" \
   -e OLLAMA_URL="http://192.168.1.100:11434" \
-  -e OLLAMA_DEFAULT_MODEL="gemma4:e4b" \
+  -e OLLAMA_DEFAULT_MODEL="gemma4-256k:latest" \
   -e EMBEDDING_MODEL="nomic-embed-text" \
   -v /volume1/docker/musicsage/data:/data \
   -v /volume1/media:/media:ro \

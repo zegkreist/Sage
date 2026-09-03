@@ -55,9 +55,12 @@ download_videos = false
 video_downloads_folder = "__AGENT_DIR__/downloads/youtube_videos"
 
 [database]
-downloads_enabled = true
+# DBs de estado desativados: downloads.db pulava faixas já registradas (mesmo
+# com o arquivo movido depois) e failed_downloads.db pulava para sempre faixas
+# que falharam uma vez. Melhor re-baixar do que ficar sem faixa.
+downloads_enabled = false
 downloads_path = "__AGENT_DIR__/config/.config/streamrip/downloads.db"
-failed_downloads_enabled = true
+failed_downloads_enabled = false
 failed_downloads_path = "__AGENT_DIR__/config/.config/streamrip/failed_downloads.db"
 
 [conversion]

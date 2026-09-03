@@ -67,8 +67,17 @@ token_guard() {
     return 1
   fi
 
-  bash "$_REFRESH_SCRIPT" --force
+  # Tenta primeiro um refresh silencioso (reusa refresh_token, sem interação).
+  # Só cai para --force (OAuth interativo) se isso também falhar.
+  bash "$_REFRESH_SCRIPT"
   local refresh_code=$?
+
+  if [[ "$refresh_code" -ne 0 ]]; then
+    echo ""
+    echo "🔐  Refresh silencioso falhou — tentando login OAuth completo..."
+    bash "$_REFRESH_SCRIPT" --force
+    refresh_code=$?
+  fi
 
   if [[ "$refresh_code" -ne 0 ]]; then
     echo ""

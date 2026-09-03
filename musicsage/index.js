@@ -30,7 +30,7 @@ const PORT = parseInt(process.env.MUSICSAGE_PORT || "3001", 10);
 const PLEX_URL = process.env.PLEX_URL || "http://localhost:32400";
 const PLEX_TOKEN = process.env.PLEX_TOKEN || "";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "gemma4:e4b";
+const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "gemma4-256k:latest";
 
 // ── Instancia serviços ────────────────────────────────────────────────────
 

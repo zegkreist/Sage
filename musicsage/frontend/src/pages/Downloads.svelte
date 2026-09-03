@@ -163,6 +163,9 @@
   let tcAuthLoading  = $state(false);
   let tcCheckLoading = $state(true);
 
+  let tcUrl          = $state('');
+  let tcUrlLoading   = $state(false);
+
   let tcArtistQuery  = $state('');
   let tcArtists      = $state([]);
   let tcArtistLoading = $state(false);
@@ -209,6 +212,19 @@
         else if (r.status === 'error') { clearInterval(intv); toast.error('Autenticação falhou'); }
       } catch { clearInterval(intv); }
     }, 3000);
+  }
+
+  async function tcDownloadFromUrl() {
+    const url = tcUrl.trim();
+    if (!url) return;
+    tcUrlLoading = true;
+    try {
+      const r = await api('POST', '/tools/tidecaller/album/download-url', { url });
+      toast.success(`Download iniciado: ${r.name ?? url}`);
+      tcUrl = '';
+      await loadDownloads();
+    } catch (e) { toast.error(e.message); }
+    finally { tcUrlLoading = false; }
   }
 
   async function tcSearchArtists() {
@@ -755,6 +771,34 @@
           {/if}
         </div>
       </div>
+
+      <!-- Baixar álbum por link do Tidal -->
+      {#if tcTokenValid}
+        <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
+          <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+            <div class="text-sm font-semibold text-white">Baixar Álbum por Link</div>
+          </div>
+          <div class="px-5 py-4">
+            <div class="flex gap-2 flex-wrap">
+              <input
+                type="text"
+                bind:value={tcUrl}
+                placeholder="https://tidal.com/browse/album/12345678"
+                class="flex-1 min-w-64 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none
+                       placeholder:text-[#5a5a78]"
+                style="background:#16161f;border:1px solid #1e1e2e"
+                onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
+                onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
+                onkeydown={e => e.key === 'Enter' && tcDownloadFromUrl()}
+              />
+              <Button size="sm" onclick={tcDownloadFromUrl} loading={tcUrlLoading} disabled={!tcUrl.trim()}>↓ Baixar</Button>
+            </div>
+            <div class="text-2xs mt-2" style="color:#5a5a78">
+              Cole o link do álbum no Tidal — o progresso aparece em “Downloads Ativos”.
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <!-- Artist search + albums -->
       {#if tcTokenValid}

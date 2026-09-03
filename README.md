@@ -170,7 +170,7 @@ Esta é a seção mais importante para subir o container corretamente.
 | `PLEX_MEDIA_PATH` | **Sim** | `/media` | Raiz da mídia dentro do container. O Sage acessa `/media/music`, `/media/movies`, `/media/tv` a partir daqui |
 | `PLEX_CONFIG_DIR` | Condicional | — | Pasta de config do Plex montada no container. Usada apenas para extrair `PLEX_TOKEN` automaticamente. Desnecessário se você passar `PLEX_TOKEN` diretamente |
 | `OLLAMA_URL` | **Sim** | — | URL do Ollama. Pode ser em outra máquina. Ex: `http://192.168.1.10:11434` |
-| `OLLAMA_DEFAULT_MODEL` | Não | `gemma4:e4b` | Modelo LLM para análise, recomendações e chat. Testados: `gemma4:e4b`, `deepseek-r1:1.5b`, `llama3.2:3b` |
+| `OLLAMA_DEFAULT_MODEL` | Não | `gemma4-256k:latest` | Modelo LLM para análise, recomendações e chat. Testados: `gemma4-256k:latest`, `deepseek-r1:1.5b`, `llama3.2:3b` |
 | `EMBEDDING_MODEL` | Não | `nomic-embed-text` | Modelo de embeddings para clustering e playlist semântica. Instale com `ollama pull nomic-embed-text` |
 | `JACKETT_URL` | Não | — | URL do Jackett. Necessário para a aba Downloads (Stormbringer). Ex: `http://192.168.1.10:9117` |
 | `JACKETT_API_KEY` | Não | — | API Key do Jackett. Alternativa: monte `/jackett-config` para extração automática do `ServerConfig.json` |
@@ -228,7 +228,7 @@ MOVIES_PATH=/caminho/absoluto/para/movies
 
 # ── Ollama ────────────────────────────────────────────────────────────────────
 OLLAMA_URL=http://localhost:11434
-OLLAMA_DEFAULT_MODEL=gemma4:e4b
+OLLAMA_DEFAULT_MODEL=gemma4-256k:latest
 
 # ── MusicSage ─────────────────────────────────────────────────────────────────
 MUSICSAGE_PORT=3002
@@ -356,7 +356,7 @@ services:
 
       # ── Ollama ───────────────────────────────────────────────────────────────
       - OLLAMA_URL=http://192.168.1.10:11434
-      - OLLAMA_DEFAULT_MODEL=gemma4:e4b
+      - OLLAMA_DEFAULT_MODEL=gemma4-256k:latest
       - EMBEDDING_MODEL=nomic-embed-text
 
       # ── Jackett ──────────────────────────────────────────────────────────────

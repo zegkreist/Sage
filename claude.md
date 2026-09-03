@@ -130,7 +130,7 @@ xdg-open http://localhost:3002
 PLEX_URL=http://localhost:32400       # URL do servidor Plex
 PLEX_TOKEN=<token-do-plex>            # Token API do Plex
 OLLAMA_URL=http://localhost:11434     # LLM local
-OLLAMA_DEFAULT_MODEL=gemma4:e4b       # Modelo de geração
+OLLAMA_DEFAULT_MODEL=gemma4-256k:latest       # Modelo de geração
 EMBEDDING_MODEL=nomic-embed-text      # Modelo de embeddings (Ollama)
 PLEX_MEDIA_PATH=/path/to/media        # Raiz local de mídia (ex: /media). Plex paths são concatenados diretamente: /media + /music/... → /media/music/...
 MUSICSAGE_PORT=3002                   # Porta HTTP (padrão 3002)
