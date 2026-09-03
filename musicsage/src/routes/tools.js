@@ -56,7 +56,10 @@ function _httpGetFollowMagnet(url, redirectsLeft = 5) {
       res.on("end", () => resolve({ buffer: Buffer.concat(chunks) }));
       res.on("error", reject);
     });
-    req.setTimeout(10_000, () => { req.destroy(new Error("timeout")); });
+    // Mesmo timeout usado na busca do Jackett (torrentSearch.js) — o download do
+    // .torrent passa pelo mesmo proxy até o indexer/tracker de origem, que pode
+    // ser igualmente lento.
+    req.setTimeout(55_000, () => { req.destroy(new Error("timeout")); });
     req.on("error", reject);
   });
 }
@@ -78,7 +81,10 @@ async function resolveTorrentId(id) {
       logger.info("SERVER", `Buffer .torrent obtido: ${result.buffer.byteLength} bytes`);
       return result.buffer;
     } catch (e) {
-      throw new Error(`Falha ao baixar .torrent (${e.message}) — ${s.slice(0, 120)}`);
+      const hint = e.message === "timeout"
+        ? " — indexer do Jackett provavelmente lento/travado, rode scripts/test-jackett.js --agg para achar qual"
+        : "";
+      throw new Error(`Falha ao baixar .torrent (${e.message})${hint} — ${s.slice(0, 120)}`);
     }
   }
   return s;
@@ -316,11 +322,19 @@ function spawnDetached(cmd, args, cwd, opts = {}) {
 const SEARCH_TIMEOUT_MS = 60_000;
 
 /** Wraps a search promise with a timeout to prevent the route hanging forever. */
-function withSearchTimeout(promise) {
+function withSearchTimeout(promise, label = "") {
+  const startedAt = Date.now();
   return Promise.race([
     promise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Tempo esgotado: nenhum provider de torrent respondeu. Verifique conectividade ou configure Jackett (JACKETT_URL).")), SEARCH_TIMEOUT_MS)
+      setTimeout(() => {
+        const elapsed = Date.now() - startedAt;
+        reject(new Error(
+          `Tempo esgotado (${elapsed}ms, limite ${SEARCH_TIMEOUT_MS}ms) na busca "${label}". ` +
+          `Verifique nos logs [STORMBRINGER] se apareceu "Jackett buscando" (chamada real ao Jackett, provavelmente indexer lento) ` +
+          `ou "Jackett NÃO disponível" (caiu no scraper público por falta de API key).`
+        ));
+      }, SEARCH_TIMEOUT_MS)
     ),
   ]);
 }
@@ -334,7 +348,7 @@ export function toolsRouter(router) {
     try {
       logger.info("SERVER", `Stormbringer search music: "${artist}" / "${album || ""}"`);
       const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchMusic(artist.trim(), album?.trim() || null));
+      const results = await withSearchTimeout(ts.searchMusic(artist.trim(), album?.trim() || null), `music: ${artist}`);
 
       const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
       res.json(
@@ -363,7 +377,7 @@ export function toolsRouter(router) {
     try {
       logger.info("SERVER", `Stormbringer search movie: "${title}" ${year || ""}`);
       const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchMovies(title.trim(), year ? parseInt(year) : null));
+      const results = await withSearchTimeout(ts.searchMovies(title.trim(), year ? parseInt(year) : null), `movie: ${title}`);
       const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
       res.json(
         results.slice(0, limit).map((r) => ({
@@ -393,7 +407,7 @@ export function toolsRouter(router) {
       const e = episode ? parseInt(episode) : null;
       logger.info("SERVER", `Stormbringer search series: "${title}" S${s ?? '?'}E${e ?? '?'}`);
       const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchSeries(title.trim(), s, e));
+      const results = await withSearchTimeout(ts.searchSeries(title.trim(), s, e), `series: ${title}`);
       const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
       res.json(
         results.slice(0, limit).map((r) => ({
