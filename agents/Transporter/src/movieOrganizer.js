@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { moveFile, ensureDir } from "./filesystem.js";
+import { moveFile, ensureDir, removeIfEmpty } from "./filesystem.js";
 import { sanitizeName } from "./strings.js";
 
 /** Extensions considered video files */
@@ -248,6 +248,7 @@ export class MovieOrganizer {
         try {
           moveFile(primaryPath, destFile);
           this._stats.moved++;
+          removeIfEmpty(folderPath);
         } catch (err) {
           console.error(
             `[MovieOrganizer] Error moving "${folderName}": ${err.message}`

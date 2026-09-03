@@ -157,6 +157,17 @@ describe("MovieOrganizer – processSource() real move", () => {
     expect(fs.existsSync(destFile)).toBe(true);
   });
 
+  test("remove a pasta de origem depois de mover o filme, se ficou vazia", () => {
+    const src = path.join(tmp, "downloads");
+    const subDir = path.join(src, "The.Dark.Knight.2008.BluRay");
+    fs.mkdirSync(subDir, { recursive: true });
+    touch(path.join(subDir, "The.Dark.Knight.2008.BluRay.mkv"), "data");
+
+    mo.processSource(src, "Test");
+
+    expect(fs.existsSync(subDir)).toBe(false);
+  });
+
   test("não duplica arquivos já no destino correto", () => {
     const src = path.join(tmp, "downloads");
     fs.mkdirSync(src, { recursive: true });
