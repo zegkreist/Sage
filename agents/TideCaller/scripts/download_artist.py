@@ -11,6 +11,7 @@ Uso:
 import sys
 import re
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -190,35 +191,109 @@ def _has_audio(folder: Path) -> bool:
     )
 
 
+def _count_audio(folder: Path) -> int:
+    return sum(
+        1 for f in folder.rglob("*")
+        if f.is_file() and f.suffix.lower() in AUDIO_EXTS
+    )
+
+
+def _expected_tracks(album) -> int | None:
+    n = getattr(album, "num_tracks", None)
+    if isinstance(n, int) and n > 0:
+        return n
+    try:
+        tracks = album.tracks()
+        return len(tracks) if tracks else None
+    except Exception:
+        return None
+
+
+def _patch_config_databases():
+    """
+    Desativa os bancos de estado do streamrip (downloads.db/failed_downloads.db).
+    downloads.db pulava faixas registradas como baixadas mesmo com o arquivo
+    movido depois; failed_downloads.db pulava para sempre faixas que falharam
+    uma vez (token expirado, 429). Melhor re-baixar do que ficar sem faixa.
+    """
+    if not CONFIG_TOML.exists():
+        return
+    try:
+        text = CONFIG_TOML.read_text(encoding="utf-8")
+        original = text
+        text = re.sub(r'(?m)^(downloads_enabled\s*=\s*)true', r'\g<1>false', text)
+        text = re.sub(r'(?m)^(failed_downloads_enabled\s*=\s*)true', r'\g<1>false', text)
+        if text != original:
+            CONFIG_TOML.write_text(text, encoding="utf-8")
+    except Exception:
+        pass  # Não bloquear o download por falha de patch
+
+
+# O rip trata falha por faixa como aviso e segue (exit 0). Sem os DBs de
+# estado, re-rodar o álbum baixa o que faltou — para quando não há progresso.
+MAX_ALBUM_ATTEMPTS = 3
+
+
 def download_url(url: str, album=None) -> bool:
-    """Baixa uma URL do Tidal via streamrip do venv e verifica arquivos de áudio."""
+    """Baixa uma URL do Tidal via streamrip do venv e verifica completude do álbum."""
     import os
     rip_bin = AGENT_DIR / ".venv_tidal" / "bin" / "rip"
     env = {
         **os.environ,
         "XDG_CONFIG_HOME": str(AGENT_DIR / "config" / ".config"),
     }
-    result = subprocess.run(
-        [str(rip_bin), "-q", "3", "url", url],
-        cwd=str(AGENT_DIR),
-        env=env,
-    )
-    if result.returncode != 0:
-        return False
+    expected = _expected_tracks(album) if album is not None else None
+    attempts = MAX_ALBUM_ATTEMPTS if expected else 1
+    prev = 0
+    downloaded = None
 
-    # streamrip às vezes retorna 0 mesmo sem baixar áudio (apenas cover.jpg).
-    # Verificar se há arquivos de áudio na pasta do álbum.
-    if album is not None:
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            time.sleep(5)
+        result = subprocess.run(
+            [str(rip_bin), "-q", "3", "url", url],
+            cwd=str(AGENT_DIR),
+            env=env,
+        )
+        if result.returncode != 0:
+            if attempt < attempts:
+                print(yellow(f"  ⚠️  rip saiu com código {result.returncode} — "
+                             f"tentando novamente ({attempt + 1}/{attempts})..."))
+                continue
+            return False
+
+        if album is None:
+            return True
+
+        # streamrip às vezes retorna 0 mesmo sem baixar áudio (apenas cover.jpg).
+        # Verificar se há arquivos de áudio na pasta do álbum.
         folder = _find_album_folder(album)
         if folder is None:
             print(yellow("  ⚠️  Pasta do álbum não encontrada após download."))
             return False
-        if not _has_audio(folder):
+        downloaded = _count_audio(folder)
+        if downloaded == 0:
             print(yellow(f"  ⚠️  Nenhum arquivo de áudio em: {folder.name}"))
             print(yellow("      (apenas cover.jpg? Token expirado ou faixa indisponível)"))
+            if attempt < attempts:
+                print(yellow(f"      tentando novamente ({attempt + 1}/{attempts})..."))
+                continue
             return False
 
-    return True
+        if expected and downloaded < expected:
+            print(yellow(f"  ⚠️  Incompleto: {downloaded}/{expected} faixas."))
+            progressed = downloaded > prev
+            if attempt < attempts and (progressed or attempt == 1):
+                print(yellow(f"      baixando de novo ({attempt + 1}/{attempts})..."))
+                prev = downloaded
+                continue
+            print(red(f"  ❌  Faltaram {expected - downloaded} faixa(s) após {attempt} tentativa(s)."))
+            return False
+
+        # Completo (ou expected desconhecido, mas há áudio)
+        return True
+
+    return False
 
 
 def album_label(album) -> str:
@@ -310,6 +385,7 @@ def main():
     print()
 
     # ── 6. Baixar ─────────────────────────────────────────────────────────────
+    _patch_config_databases()
     ok = 0
     fail = 0
     for i, album in enumerate(selected, 1):

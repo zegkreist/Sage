@@ -238,9 +238,15 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
           if (entry) {
             entry.status = parsed.ok ? "done" : "error";
             if (parsed.error) entry.lastError = parsed.error;
+            if (parsed.tracksExpected != null) {
+              entry.tracksExpected = parsed.tracksExpected;
+              entry.tracksDownloaded = parsed.tracksDownloaded;
+              entry.complete = parsed.complete;
+            }
             const icon = parsed.ok ? "✓" : "✗";
             const qualityNote = parsed.quality != null ? ` (q=${parsed.quality})` : "";
-            logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"${qualityNote}`);
+            const tracksNote = parsed.tracksExpected != null ? ` [${parsed.tracksDownloaded ?? "?"}/${parsed.tracksExpected}]` : "";
+            logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"${qualityNote}${tracksNote}`);
             if (!parsed.ok && parsed.error) logger.warn("SERVER", `TideCaller erro álbum ${parsed.albumId}: ${parsed.error}`);
             if (parsed.ok && parsed.output)  logger.info("SERVER", `TideCaller saida álbum ${parsed.albumId}: ${parsed.output}`);
           }
