@@ -20,6 +20,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.absolute()
 AGENT_DIR = SCRIPT_DIR.parent
 CONFIG_TOML = AGENT_DIR / "config" / ".config" / "streamrip" / "config.toml"
+CONFIG_TEMPLATE = SCRIPT_DIR / "config.toml.template"
 TOKENS_BACKUP = SCRIPT_DIR / "tidal_tokens.txt"
 
 # ── Importação com mensagem amigável ──────────────────────────────────────────
@@ -33,11 +34,29 @@ except ImportError:
 
 # ── Utilitários ───────────────────────────────────────────────────────────────
 
+def _bootstrap_config_from_template() -> bool:
+    """
+    Cria config.toml a partir do config.toml.template quando ele ainda não existe
+    (ex: container com tidalapi/streamrip pré-instalados, onde o ensure_setup.sh
+    pula o setup.sh — que normalmente é quem cria esse arquivo — achando que não
+    há nada a fazer).
+    """
+    if not CONFIG_TEMPLATE.exists():
+        print(f"⚠️  config.toml.template não encontrado em: {CONFIG_TEMPLATE}")
+        return False
+    CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
+    template_text = CONFIG_TEMPLATE.read_text(encoding="utf-8")
+    CONFIG_TOML.write_text(template_text.replace("__AGENT_DIR__", str(AGENT_DIR)), encoding="utf-8")
+    print(f"📄 config.toml criado a partir do template: {CONFIG_TOML}")
+    return True
+
+
 def read_config() -> str:
-    """Lê o conteúdo atual do config.toml."""
+    """Lê o conteúdo atual do config.toml, criando a partir do template se necessário."""
     if not CONFIG_TOML.exists():
-        print(f"⚠️  config.toml não encontrado em: {CONFIG_TOML}")
-        return ""
+        if not _bootstrap_config_from_template():
+            print(f"⚠️  config.toml não encontrado em: {CONFIG_TOML}")
+            return ""
     return CONFIG_TOML.read_text(encoding="utf-8")
 
 
@@ -226,10 +245,10 @@ def apply_tokens(session: "tidalapi.Session"):
     access_token = session.access_token or ""
     refresh_token = session.refresh_token or ""
 
-    # Sempre grava +7 dias independente do expiry real do tidalapi.
-    # O streamrip usa client_id revogado para refresh — se o expiry for < 1 dia
-    # ele tenta refresh e falha. Forçando +7 dias ele usa o access_token direto.
-    expiry = int(time.time()) + (7 * 24 * 3600)
+    # Grava o expiry real da sessão (streamrip >= 2.2.0 corrigiu o client_id de
+    # refresh, então não precisamos mais mentir a expiração pra forçar o
+    # streamrip a usar o access_token direto).
+    expiry = int(session.expiry_time.timestamp()) if session.expiry_time else int(time.time()) + 3600
 
     print()
     print("─" * 60)
