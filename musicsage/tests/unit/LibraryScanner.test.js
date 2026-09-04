@@ -126,6 +126,67 @@ describe("LibraryScanner", () => {
     });
   });
 
+  // ── Cache e resiliência do scan ──────────────────────────────────────────
+
+  describe("cache e resiliência do scan", () => {
+    function mockScanSuccess() {
+      axios.get
+        .mockResolvedValueOnce(PLEX_SECTIONS_RESPONSE)
+        .mockResolvedValueOnce(PLEX_ARTISTS_RESPONSE)
+        .mockResolvedValueOnce(PLEX_ALBUMS_RESPONSE)
+        .mockResolvedValueOnce(PLEX_TRACKS_RESPONSE);
+    }
+
+    it("erro de scan NÃO zera o snapshot anterior", async () => {
+      mockScanSuccess();
+      await scanner.scan();
+      expect(scanner.getLibraryStats().totalArtists).toBe(3);
+
+      // TTL expirado + Plex fora do ar → mantém snapshot
+      scanner._lastSuccessAt = Date.now() - 61_000;
+      axios.get.mockRejectedValue(new Error("ECONNREFUSED"));
+      const result = await scanner.scan();
+
+      expect(result.artists).toHaveLength(3);
+      expect(scanner.getLibraryStats().totalArtists).toBe(3);
+    });
+
+    it("scan dentro do TTL não refaz as chamadas ao Plex", async () => {
+      mockScanSuccess();
+      await scanner.scan();
+      expect(axios.get).toHaveBeenCalledTimes(4);
+
+      await scanner.scan();
+      expect(axios.get).toHaveBeenCalledTimes(4);
+    });
+
+    it("scans concorrentes compartilham a mesma promise (1 scan só)", async () => {
+      mockScanSuccess();
+      // _lastSuccessAt=0 → primeira chamada dispara scan; segunda pega a inflight
+      const [a, b] = await Promise.all([scanner.scan(), scanner.scan()]);
+      expect(axios.get).toHaveBeenCalledTimes(4);
+      expect(a.tracks).toHaveLength(2);
+      expect(b.tracks).toHaveLength(2);
+    });
+
+    it("após falha, respeita cooldown antes de tentar de novo", async () => {
+      axios.get.mockRejectedValueOnce(new Error("timeout"));
+      await scanner.scan();
+      expect(axios.get).toHaveBeenCalledTimes(1);
+
+      await scanner.scan();
+      expect(axios.get).toHaveBeenCalledTimes(1); // cooldown — não martela o Plex
+    });
+
+    it("propaga timeout nas chamadas ao Plex", async () => {
+      mockScanSuccess();
+      await scanner.scan();
+      for (const call of axios.get.mock.calls) {
+        expect(call[1].timeout).toBe(10_000);
+      }
+    });
+  });
+
   // ── getArtistNames() ─────────────────────────────────────────────────────
 
   describe("getArtistNames()", () => {

@@ -214,7 +214,7 @@ export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer,
       // Sincroniza com Plex em background (não bloqueia) se saveToPlex e plexService disponível
       if (saveToPlex && plexService && saved) {
         plexService
-          .createPlaylist(saved.name, saved.tracks.map(t => t.ratingKey))
+          .pushPlaylist(saved.name, saved.tracks.map(t => t.ratingKey))
           .then(({ plexId }) => playlistBuilder.update(saved.id, { plexId }))
           .catch(err => logger.warn("AUDIO", `Plex sync falhou: ${err.message}`));
       }
@@ -409,6 +409,11 @@ export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer,
                 album:  track.parentTitle,
               };
               const analysis = await analyzer.analyzeAudioFile(filePath, meta, { maxAudioSecs });
+              if (analysis?._fallback) {
+                batchJob.failed++;
+                logger.warn("AUDIO_REANALYZE", `Análise indisponível (fallback transitivo), não persistida: ${meta.artist} – ${meta.title}`);
+                continue;
+              }
               analysisCache.set(ratingKey, { ...meta, filePath }, analysis);
               batchJob.done++;
               batchJob.current = `${meta.artist} – ${meta.title}`;
@@ -536,6 +541,13 @@ export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer,
                 album:  track.parentTitle,
               };
               const analysis = await analyzer.analyzeAudioFile(filePath, meta, { maxAudioSecs });
+              if (analysis?._fallback) {
+                // Fallback transitivo (ex: Ollama fora do ar) — persistir poluiria
+                // o cache e o skipExisting pularia a faixa para sempre
+                batchJob.failed++;
+                logger.warn("AUDIO_BATCH", `Análise indisponível (fallback transitivo), não persistida: ${meta.artist} – ${meta.title}`);
+                continue;
+              }
               analysisCache.set(ratingKey, { ...meta, filePath }, analysis);
               batchJob.done++;
               batchJob.current = `${meta.artist} – ${meta.title}`;

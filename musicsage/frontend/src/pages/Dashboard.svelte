@@ -18,15 +18,12 @@
   let metrics     = $state(null);
   let moodDay     = $state(null);
   let moodMonth   = $state(null);
-  let curiosidades = $state([]);
-  let history     = $state([]);
   let discoveries = $state([]);
   let subgenreDistrib = $state([]);  // [{ name, count, pct }]
 
   let loadingStats    = $state(true);
   let loadingMetrics  = $state(false);
   let loadingMood     = $state(true);
-  let loadingHistory  = $state(true);
   let loadingDisc     = $state(true);
   let _userEffectRan  = false;  // skip first $effect run (onMount already loads)
 
@@ -90,7 +87,7 @@
     try {
       const data = await api('GET', '/library/users');
       users.set(data?.users ?? []);
-    } catch { /* silently ignore if users API unavailable */ }
+    } catch (e) { toast.error(`Usuários Plex: ${e.message}`); }
   }
 
   async function loadMetrics() {
@@ -111,16 +108,6 @@
       ]);
     } catch (e) { toast.error(`Mood: ${e.message}`); }
     finally { loadingMood = false; }
-  }
-
-  async function loadHistory() {
-    loadingHistory = true;
-    try {
-      const data = await api('GET', '/library/recently-played?limit=25');
-      history      = data?.tracks   ?? data ?? [];
-      curiosidades = (await api('GET', '/library/curiosidades').catch(() => null))?.facts ?? [];
-    } catch (e) { toast.error(`Histórico: ${e.message}`); }
-    finally { loadingHistory = false; }
   }
 
   async function loadDiscoveries() {
@@ -162,7 +149,7 @@
                   : t.analysis?.genre && t.analysis.genre !== 'unknown'     ? t.analysis.genre
                   : null,
         }));
-    } catch { /* non-critical */ }
+    } catch (e) { toast.error(`Descobertas: ${e.message}`); }
     finally { loadingDisc = false; }
   }
 

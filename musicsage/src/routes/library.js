@@ -11,7 +11,12 @@
 import { logger } from "../logger.js";
 
 export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService }) {
-  router.get("/library/stats", (_req, res) => {
+  router.get("/library/stats", async (_req, res) => {
+    // Rescan lazy: garante que não sirva zeros após cold start/falha transitória.
+    // O scanner tem TTL + inflight — se o snapshot é recente, é de graça.
+    try {
+      await libraryScanner.scan();
+    } catch { /* scan já mantém último snapshot; nunca bloqueia o stats */ }
     const stats = libraryScanner.getLibraryStats();
     const totalPlaylists = playlistBuilder ? playlistBuilder.list().length : 0;
     res.json({ ...stats, totalPlaylists });

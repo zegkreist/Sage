@@ -116,7 +116,7 @@
       showSugg    = suggestions.length > 0;
       activeSugg  = -1;
       _updateDropPos();
-    } catch { suggestions = []; }
+    } catch { suggestions = []; showSugg = false; }
   }
 
   function onArtistInput(e) {

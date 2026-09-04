@@ -15,6 +15,8 @@
   let sbDownloads  = $state([]);
   let tcDownloads  = $state([]);
   let pollId       = null;
+  let oauthPollId  = null;
+  let apiDown      = false;   // evita toast de erro a cada poll de 5s
 
   onMount(() => {
     loadDownloads();
@@ -29,17 +31,22 @@
       downloadIntent.set(null);
     }
   });
-  onDestroy(() => clearInterval(pollId));
+  onDestroy(() => { clearInterval(pollId); if (oauthPollId) clearInterval(oauthPollId); });
 
   async function loadDownloads() {
-    try {
-      const [sb, tc] = await Promise.allSettled([
-        api('GET', '/tools/stormbringer/downloads'),
-        api('GET', '/tools/tidecaller/downloads'),
-      ]);
-      if (sb.status === 'fulfilled') sbDownloads = sb.value?.torrents ?? [];
-      if (tc.status === 'fulfilled') tcDownloads = Array.isArray(tc.value) ? tc.value : [];
-    } catch { /* non-critical */ }
+    const [sb, tc] = await Promise.allSettled([
+      api('GET', '/tools/stormbringer/downloads'),
+      api('GET', '/tools/tidecaller/downloads'),
+    ]);
+    if (sb.status === 'fulfilled') sbDownloads = sb.value?.torrents ?? [];
+    if (tc.status === 'fulfilled') tcDownloads = Array.isArray(tc.value) ? tc.value : [];
+    const allFailed = sb.status === 'rejected' && tc.status === 'rejected';
+    if (allFailed && !apiDown) {
+      apiDown = true;
+      toast.error('API de downloads indisponível (Stormbringer e TideCaller falharam)');
+    } else if (!allFailed) {
+      apiDown = false;
+    }
   }
 
   // ─── STORMBRINGER ────────────────────────────────────────
@@ -146,6 +153,18 @@
     } catch (e) { toast.error(e.message); }
   }
 
+  let confirmRemoveHash = $state(null);  // 2º clique confirma remoção com delete de arquivos
+
+  function sbRemoveClick(infoHash) {
+    if (confirmRemoveHash === infoHash) {
+      confirmRemoveHash = null;
+      sbRemove(infoHash, true);
+    } else {
+      confirmRemoveHash = infoHash;
+      setTimeout(() => { if (confirmRemoveHash === infoHash) confirmRemoveHash = null; }, 4000);
+    }
+  }
+
   async function sbRemove(infoHash, deleteFiles = false) {
     try {
       await api('DELETE', `/tools/stormbringer/download/${infoHash}?deleteFiles=${deleteFiles}`);
@@ -204,13 +223,14 @@
 
   async function pollOauthStatus() {
     if (!tcOauthSession) return;
-    const intv = setInterval(async () => {
+    if (oauthPollId) clearInterval(oauthPollId);
+    oauthPollId = setInterval(async () => {
       try {
         const r = await api('GET', `/tools/tidecaller/token/status/${tcOauthSession}`);
         tcOauthStatus = r.status;
-        if (r.status === 'done') { tcTokenValid = true; clearInterval(intv); }
-        else if (r.status === 'error') { clearInterval(intv); toast.error('Autenticação falhou'); }
-      } catch { clearInterval(intv); }
+        if (r.status === 'done') { tcTokenValid = true; clearInterval(oauthPollId); oauthPollId = null; }
+        else if (r.status === 'error') { clearInterval(oauthPollId); oauthPollId = null; toast.error('Autenticação falhou'); }
+      } catch { clearInterval(oauthPollId); oauthPollId = null; toast.error('Falha ao consultar status do login OAuth'); }
     }, 3000);
   }
 
@@ -382,7 +402,11 @@
               </span>
             </div>
           </div>
-          <Button size="xs" variant="danger" onclick={() => sbRemove(t.infoHash, true)}>✕</Button>
+          {#if confirmRemoveHash === t.infoHash}
+            <Button size="xs" variant="danger" onclick={() => sbRemoveClick(t.infoHash)}>Remover + arquivos?</Button>
+          {:else}
+            <Button size="xs" variant="danger" onclick={() => sbRemoveClick(t.infoHash)}>✕</Button>
+          {/if}
         </div>
       {/each}
 
