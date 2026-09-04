@@ -555,3 +555,77 @@ describe("Favoritos", () => {
     });
   });
 });
+
+// ── Descoberta semanal (fase 5) ───────────────────────────────────────────
+
+describe("Descoberta semanal", () => {
+  const makeWeekly = (over = {}) => ({
+    status: jest.fn().mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 7, running: false, nextRunAt: null }),
+    updateSettings: jest.fn().mockImplementation((patch) => ({ enabled: false, dayOfWeek: 1, hour: 7, ...patch })),
+    run: jest.fn().mockResolvedValue({ id: "pl-1", name: "Descobertas", trackCount: 20 }),
+    ...over,
+  });
+
+  it("GET /api/weekly devolve o estado do agendador", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).get("/api/weekly");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ enabled: false, dayOfWeek: 1, hour: 7 });
+  });
+
+  it("GET /api/weekly devolve 503 sem o serviço", async () => {
+    const res = await supertest(createServer({})).get("/api/weekly");
+    expect(res.status).toBe(503);
+  });
+
+  it("PUT /api/weekly aplica os ajustes válidos", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).put("/api/weekly").send({ enabled: true, dayOfWeek: 5, hour: 20 });
+
+    expect(res.status).toBe(200);
+    expect(weeklyDiscoveryService.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, dayOfWeek: 5, hour: 20 })
+    );
+  });
+
+  it.each([
+    ["dayOfWeek", { dayOfWeek: 9 }],
+    ["hour",      { hour: 42 }],
+    ["size",      { size: 1 }],
+  ])("PUT /api/weekly rejeita %s fora da faixa", async (_campo, body) => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).put("/api/weekly").send(body);
+
+    expect(res.status).toBe(400);
+    expect(weeklyDiscoveryService.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/weekly/run devolve 202 com jobId", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).post("/api/weekly/run");
+
+    expect(res.status).toBe(202);
+    expect(res.body.jobId).toEqual(expect.any(String));
+  });
+
+  it("POST /api/weekly/run devolve 409 se já está rodando", async () => {
+    const weeklyDiscoveryService = makeWeekly({
+      status: jest.fn().mockReturnValue({ running: true }),
+    });
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).post("/api/weekly/run");
+
+    expect(res.status).toBe(409);
+    expect(weeklyDiscoveryService.run).not.toHaveBeenCalled();
+  });
+});

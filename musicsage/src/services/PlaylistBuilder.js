@@ -1216,7 +1216,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
    * @param {object} analysisCache    — instância de AnalysisCacheService
    * @returns {Promise<object>}        playlist com id, name, tracks[], createdAt, prompt
    */
-  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null, onProgress = null, favoriteKeys = null } = {}) {
+  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null, onProgress = null, favoriteKeys = null, candidateRatingKeys = null } = {}) {
     logger.info('PLAYLIST', `generateFromCacheWithPrompt()`, { prompt, maxPerArtist, discoveryRatio, sizeOverride });
     const report = (stage, pct) => onProgress?.(stage, pct);
 
@@ -1229,6 +1229,14 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
         favoriteKeys.has(FavoritesService.makeKey(e.artist, e.title, e.parentTitle || e.album)));
       if (!allEntries.length) {
         throw new Error('Nenhuma faixa favorita no cache. Favorite faixas primeiro (coração na lista de faixas).');
+      }
+    }
+    // Restringe o pool a um conjunto pré-selecionado de ratingKeys (ex: a semente
+    // de faixas pouco ouvidas da descoberta semanal)
+    if (candidateRatingKeys) {
+      allEntries = allEntries.filter(e => candidateRatingKeys.has(String(e.ratingKey)));
+      if (!allEntries.length) {
+        throw new Error('Nenhuma das faixas candidatas está no cache de análise.');
       }
     }
 

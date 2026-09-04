@@ -25,6 +25,7 @@ import { PlaylistBuilder } from "./src/services/PlaylistBuilder.js";
 import { LastFmService } from "./src/services/LastFmService.js";
 import { LyricsService } from "./src/services/LyricsService.js";
 import { FavoritesService } from "./src/services/FavoritesService.js";
+import { WeeklyDiscoveryService } from "./src/services/WeeklyDiscoveryService.js";
 import { createServer } from "./src/server.js";
 
 const PORT = parseInt(process.env.MUSICSAGE_PORT || "3001", 10);
@@ -77,6 +78,18 @@ const embeddingService  = new EmbeddingService({
 const playlistBuilder = new PlaylistBuilder({ allfather, libraryScanner, embeddingService });
 const lyricsService   = new LyricsService({ audioAnalyzer });
 
+const weeklyDiscoveryService = new WeeklyDiscoveryService({
+  playlistBuilder,
+  analysisCache,
+  libraryScanner,
+  favoritesService,
+  recommendationEngine,
+  historyService,
+  plexService,
+  embeddingService,
+  clusteringService,
+}).load();
+
 // Carrega cache de análises salvas anteriormente — await garante que o cache
 // está disponível antes do primeiro request chegar ao servidor
 try {
@@ -101,7 +114,10 @@ libraryScanner.scan().then((result) => {
 
 // ── Sobe o servidor ───────────────────────────────────────────────────────
 
-const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService });
+const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService });
+
+// Agendador da descoberta semanal — só dispara se estiver habilitado nas settings
+weeklyDiscoveryService.start();
 
 const server = app.listen(PORT);
 
