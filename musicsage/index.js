@@ -9,15 +9,11 @@ const { config: dotenvConfig } = await import("dotenv");
 dotenvConfig({ path: join(__dirname, "../.env") });
 
 import { logger } from "./src/logger.js";
-import { PlexService } from "./src/services/PlexService.js";
 import { EmbeddingService } from "./src/services/EmbeddingService.js";
 import { ClusteringService } from "./src/services/ClusteringService.js";
 import { AudioAnalyzerService } from "./src/services/AudioAnalyzerService.js";
 import axios from "axios";
 import { AllFather } from "@plex-agents/allfather";
-import { LibraryScanner } from "./src/services/LibraryScanner.js";
-import { HistoryService } from "./src/services/HistoryService.js";
-import { MetricsService } from "./src/services/MetricsService.js";
 import { MusicAnalyzer } from "./src/services/MusicAnalyzer.js";
 import { AnalysisCacheService } from "./src/services/AnalysisCacheService.js";
 import { RecommendationEngine } from "./src/services/RecommendationEngine.js";
@@ -26,11 +22,14 @@ import { LastFmService } from "./src/services/LastFmService.js";
 import { LyricsService } from "./src/services/LyricsService.js";
 import { FavoritesService } from "./src/services/FavoritesService.js";
 import { WeeklyDiscoveryService } from "./src/services/WeeklyDiscoveryService.js";
+import { createMediaServer } from "./src/media/index.js";
 import { createServer } from "./src/server.js";
 
 const PORT = parseInt(process.env.MUSICSAGE_PORT || "3001", 10);
-const PLEX_URL = process.env.PLEX_URL || "http://localhost:32400";
-const PLEX_TOKEN = process.env.PLEX_TOKEN || "";
+// PLEX_URL/PLEX_TOKEN continuam valendo — MEDIA_SERVER_* é o nome novo, neutro
+const MEDIA_SERVER       = process.env.MEDIA_SERVER || "plex";
+const MEDIA_SERVER_URL   = process.env.MEDIA_SERVER_URL   || process.env.PLEX_URL   || "http://localhost:32400";
+const MEDIA_SERVER_TOKEN = process.env.MEDIA_SERVER_TOKEN || process.env.PLEX_TOKEN || "";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "gemma4-256k:latest";
 
@@ -43,12 +42,23 @@ const allfather = new AllFather({
   disableReasoning: true,
 });
 
-const libraryScanner = new LibraryScanner({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN });
-const historyService = new HistoryService({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN });
+const analysisCache = new AnalysisCacheService();
+
+// Único ponto do app que sabe QUAL servidor de mídia está rodando
+const mediaServer = createMediaServer({
+  type:  MEDIA_SERVER,
+  axios,
+  url:   MEDIA_SERVER_URL,
+  token: MEDIA_SERVER_TOKEN,
+  analysisCache,
+});
+
+const libraryScanner = mediaServer.library;
+const historyService = mediaServer.history;
+const metricsService = mediaServer.metrics;
+
 const lastFmService = new LastFmService({ axios, apiKey: process.env.LASTFM_API_KEY });
 const analyzer = new MusicAnalyzer({ allfather, lastFmService });
-const analysisCache   = new AnalysisCacheService();
-const metricsService = new MetricsService({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN, analysisCache });
 
 const favoritesService = new FavoritesService().load();
 
@@ -62,7 +72,6 @@ const recommendationEngine = new RecommendationEngine({
   favoritesService,
 });
 
-const plexService     = new PlexService({ axios, plexUrl: PLEX_URL, plexToken: PLEX_TOKEN });
 const clusteringService = new ClusteringService();
 const audioAnalyzer     = new AudioAnalyzerService({
   plexMediaRoot: process.env.PLEX_MEDIA_PATH || "/home/developer/workspace/plex_server/media",
@@ -85,7 +94,7 @@ const weeklyDiscoveryService = new WeeklyDiscoveryService({
   favoritesService,
   recommendationEngine,
   historyService,
-  plexService,
+  mediaPlaylists: mediaServer.playlists,
   embeddingService,
   clusteringService,
 }).load();
@@ -101,7 +110,7 @@ try {
 // ── Inicializa e faz scan inicial da biblioteca ───────────────────────────
 
 logger.info("SERVER", "🎵 MusicSage — iniciando...");
-logger.info("SERVER", `Plex: ${PLEX_URL}`);
+logger.info("SERVER", `${MEDIA_SERVER}: ${MEDIA_SERVER_URL}`);
 logger.info("SERVER", `Ollama: ${OLLAMA_URL} (${MODEL})`);
 logger.info("SERVER", `Log: ${logger.logFilePath()}`);
 
@@ -114,7 +123,7 @@ libraryScanner.scan().then((result) => {
 
 // ── Sobe o servidor ───────────────────────────────────────────────────────
 
-const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService });
+const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService });
 
 // Agendador da descoberta semanal — só dispara se estiver habilitado nas settings
 weeklyDiscoveryService.start();

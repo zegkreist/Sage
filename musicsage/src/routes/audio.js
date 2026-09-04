@@ -25,9 +25,9 @@ const batchJob = {
 
 /**
  * @param {import('express').Router} router
- * @param {{ analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner }} deps
+ * @param {{ analyzer, embeddingService, audioAnalyzer, playlistBuilder, mediaPlaylists, analysisCache, libraryScanner }} deps
  */
-export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner } = {}) {
+export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, mediaPlaylists, analysisCache, libraryScanner } = {}) {
 
   /**
    * POST /api/audio/analyze
@@ -211,9 +211,9 @@ export function audioRouter(router, { analyzer, embeddingService, audioAnalyzer,
       // Salva no store interno
       const saved = playlistBuilder.save(playlist);
 
-      // Sincroniza com Plex em background (não bloqueia) se saveToPlex e plexService disponível
-      if (saveToPlex && plexService && saved) {
-        plexService
+      // Sincroniza com o servidor de mídia em background (não bloqueia) se saveToPlex e o port existir
+      if (saveToPlex && mediaPlaylists && saved) {
+        mediaPlaylists
           .pushPlaylist(saved.name, saved.tracks.map(t => t.ratingKey))
           .then(({ plexId }) => playlistBuilder.update(saved.id, { plexId }))
           .catch(err => logger.warn("AUDIO", `Plex sync falhou: ${err.message}`));

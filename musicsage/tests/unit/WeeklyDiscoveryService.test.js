@@ -37,7 +37,7 @@ function makeDeps({ dataDir, now, viewCounts = { "1": 0, "2": 90, "3": 5 } } = {
     },
     historyService: { getRecentlyPlayedFull: jest.fn().mockResolvedValue([]) },
     recommendationEngine: { _buildAudioProfile: () => ({ topGenres: ["Rock"], avgEnergy: 6 }) },
-    plexService: { pushPlaylist: jest.fn().mockResolvedValue({ plexId: "plex-7" }) },
+    mediaPlaylists: { pushPlaylist: jest.fn().mockResolvedValue({ plexId: "plex-7" }) },
     dataDir,
     now: () => now,
     sleep: jest.fn().mockResolvedValue(undefined),   // backoff sem esperar de verdade
@@ -163,7 +163,7 @@ describe("WeeklyDiscoveryService", () => {
       expect(opts.candidateRatingKeys).toBeInstanceOf(Set);
       expect(opts.candidateRatingKeys.has("1")).toBe(true);
 
-      expect(deps.plexService.pushPlaylist).toHaveBeenCalledWith(res.name, ["1", "3"]);
+      expect(deps.mediaPlaylists.pushPlaylist).toHaveBeenCalledWith(res.name, ["1", "3"]);
       expect(deps.playlistBuilder.update).toHaveBeenCalledWith("pl-1", { plexId: "plex-7" });
       expect(res).toMatchObject({ id: "pl-1", plexId: "plex-7", trackCount: 2 });
     });
@@ -180,7 +180,7 @@ describe("WeeklyDiscoveryService", () => {
 
     it("Plex fora não invalida a playlist — ela fica local sem plexId", async () => {
       const { svc, deps } = make();
-      deps.plexService.pushPlaylist.mockRejectedValue(new Error("Plex offline"));
+      deps.mediaPlaylists.pushPlaylist.mockRejectedValue(new Error("Plex offline"));
 
       const res = await svc.run();
 

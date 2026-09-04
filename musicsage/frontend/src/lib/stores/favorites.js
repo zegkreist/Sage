@@ -34,8 +34,9 @@ export function getFavorite(artist, title, album) {
 /**
  * Aplica o patch localmente antes do request (otimista) e reverte se o
  * servidor recusar — favoritar é ação de um clique, esperar round-trip trava a lista.
- * @param {{artist?: string, title?: string, album?: string}} track
+ * @param {{artist?: string, title?: string, album?: string, ratingKey?: string}} track
  * @param {{starred?: boolean, rating?: number|null}} patch
+ * @returns {Promise<{favorite: object|null, mediaServer?: {synced: boolean, reason?: string}}|null>}
  */
 export async function setFavorite(track, patch) {
   const key  = favKey(track.artist, track.title, track.album);
@@ -43,6 +44,7 @@ export async function setFavorite(track, patch) {
 
   const optimistic = {
     artist: track.artist ?? '', title: track.title ?? '', album: track.album ?? '',
+    ratingKey: track.ratingKey || prev?.ratingKey || null,
     starred: typeof patch.starred === 'boolean' ? patch.starred : (prev?.starred ?? false),
     rating:  patch.rating !== undefined ? patch.rating : (prev?.rating ?? null),
   };
@@ -61,7 +63,8 @@ export async function setFavorite(track, patch) {
       if (res?.favorite) next.set(key, res.favorite); else next.delete(key);
       return next;
     });
-    return res?.favorite ?? null;
+    // Devolve a resposta inteira: quem chama precisa saber se a nota chegou no servidor
+    return res ?? null;
   } catch (e) {
     favorites.update((m) => {
       const next = new Map(m);

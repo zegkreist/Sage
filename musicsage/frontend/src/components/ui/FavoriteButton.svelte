@@ -6,6 +6,7 @@
     artist = '',
     title  = '',
     album  = '',
+    ratingKey = '',       // id no servidor de mídia — permite espelhar a nota lá
     withRating = false,   // mostra as 5 estrelas ao lado do coração
     class: cls = '',
   } = $props();
@@ -17,11 +18,19 @@
 
   let busy = $state(false);
 
+  // Motivos que não são falha: nada mudou, ou o espelho está desligado de propósito
+  const RUIDO = /não mudou|desligada|não havia nota|não suporta/;
+
   async function apply(patch) {
     if (busy) return;
     busy = true;
     try {
-      await setFavorite({ artist, title, album }, patch);
+      const res = await setFavorite({ artist, title, album, ratingKey }, patch);
+      const sync = res?.mediaServer;
+      if (sync && !sync.synced && !RUIDO.test(sync.reason ?? '')) {
+        // A nota está salva aqui; só não chegou no servidor de mídia
+        toast.warn(`Nota salva, mas não foi para o servidor de mídia: ${sync.reason}`);
+      }
     } catch (e) {
       toast.error(`Não consegui salvar o favorito: ${e.message}`);
     } finally {

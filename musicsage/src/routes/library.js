@@ -10,7 +10,7 @@
  */
 import { logger } from "../logger.js";
 
-export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService, favoritesService }) {
+export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, mediaServer, favoritesService }) {
   router.get("/library/stats", async (_req, res) => {
     // Rescan lazy: garante que não sirva zeros após cold start/falha transitória.
     // O scanner tem TTL + inflight — se o snapshot é recente, é de graça.
@@ -115,9 +115,9 @@ export function libraryRouter(router, { libraryScanner, historyService, metricsS
   });
 
   router.get("/library/users", async (_req, res) => {
-    if (!plexService) return res.status(503).json({ error: "PlexService não disponível" });
+    if (!mediaServer) return res.status(503).json({ error: "Servidor de mídia não disponível" });
     try {
-      const users = await plexService.getUsers();
+      const users = await mediaServer.getUsers();
       res.json({ users });
     } catch (err) {
       res.status(500).json({ error: err.message });

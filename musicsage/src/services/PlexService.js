@@ -110,6 +110,29 @@ export class PlexService {
   }
 
   /**
+   * Grava a nota do usuário numa faixa do Plex.
+   *
+   * O Plex trabalha com userRating de 0 a 10 (5 estrelas = 10), então a nota de
+   * 0-5 do MusicSage é dobrada. `null` limpa a nota (rating=-1).
+   *
+   * @param {string} ratingKey       — id da faixa no Plex
+   * @param {number|null} rating0to5 — 0-5, ou null para limpar
+   */
+  async setRating(ratingKey, rating0to5) {
+    if (!ratingKey) throw new Error("ratingKey é obrigatório para gravar a nota no Plex");
+    const rating = rating0to5 == null
+      ? -1
+      : Math.max(0, Math.min(10, Math.round(rating0to5 * 2)));
+
+    await this.axios.put(`${this.plexUrl}/:/rate`, null, {
+      headers: this._headers,
+      params: { key: ratingKey, identifier: "com.plexapp.plugins.library", rating },
+      timeout: 5000,
+    });
+    logger.info("PLEX", `Nota ${rating0to5 ?? "—"}/5 gravada na faixa ${ratingKey} (userRating=${rating})`);
+  }
+
+  /**
    * Retorna as contas (usuários) que têm acesso ao servidor Plex.
    * @returns {Promise<Array<{id: number, name: string, thumb: string|null}>>}
    */
