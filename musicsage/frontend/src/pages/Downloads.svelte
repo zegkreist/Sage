@@ -14,6 +14,9 @@
   // ─── Active downloads monitor ────────────────────────────
   let sbDownloads  = $state([]);
   let tcDownloads  = $state([]);
+  let tpRuns       = $state([]);      // transporter em andamento
+  let queueHistory = $state([]);      // histórico persistido
+  let autoTransporter = $state(true); // transportar ao concluir download
   let pollId       = null;
   let oauthPollId  = null;
   let apiDown      = false;   // evita toast de erro a cada poll de 5s
@@ -33,20 +36,51 @@
   });
   onDestroy(() => { clearInterval(pollId); if (oauthPollId) clearInterval(oauthPollId); });
 
+  // Fila unificada: um único request alimenta torrents + tidal + transporter
   async function loadDownloads() {
-    const [sb, tc] = await Promise.allSettled([
-      api('GET', '/tools/stormbringer/downloads'),
-      api('GET', '/tools/tidecaller/downloads'),
-    ]);
-    if (sb.status === 'fulfilled') sbDownloads = sb.value?.torrents ?? [];
-    if (tc.status === 'fulfilled') tcDownloads = Array.isArray(tc.value) ? tc.value : [];
-    const allFailed = sb.status === 'rejected' && tc.status === 'rejected';
-    if (allFailed && !apiDown) {
-      apiDown = true;
-      toast.error('API de downloads indisponível (Stormbringer e TideCaller falharam)');
-    } else if (!allFailed) {
+    try {
+      const q = await api('GET', '/tools/queue');
+      const items = q.items ?? [];
+      sbDownloads = items.filter(i => i.source === 'torrent').map(i => ({
+        infoHash: i.id, name: i.title, type: i.type, status: i.status,
+        progress: i.pct, downloadSpeed: i.speed, peers: i.peers, startTime: i.startedAt,
+      }));
+      tcDownloads = items.filter(i => i.source === 'tidal').map(i => ({
+        jobId: i.id, artistName: (i.title || '').replace('TideCaller — ', ''),
+        status: i.status, startedAt: i.startedAt,
+        stage: i.stage, queuePct: i.pct, albums: i.albums ?? [],
+      }));
+      tpRuns = items.filter(i => i.source === 'transporter');
+      queueHistory = q.history ?? [];
+      autoTransporter = q.autoTransporter ?? true;
       apiDown = false;
+    } catch (e) {
+      if (!apiDown) { apiDown = true; toast.error(`Fila de downloads indisponível: ${e.message}`); }
     }
+  }
+
+  async function toggleAutoTransporter() {
+    try {
+      const r = await api('POST', '/tools/settings', { autoTransporter: !autoTransporter });
+      autoTransporter = r.autoTransporter;
+      toast.success(autoTransporter ? 'Transporte automático ligado' : 'Transporte automático desligado');
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function tcCancel(jobId) {
+    try {
+      await api('POST', `/tools/queue/tidal/${jobId}/cancel`);
+      toast('Download cancelado');
+      await loadDownloads();
+    } catch (e) { toast.error(e.message); }
+  }
+
+  async function tcRetry(jobId) {
+    try {
+      const r = await api('POST', `/tools/queue/tidal/${jobId}/retry`);
+      toast.success(`Re-baixando ${r.albums} álbum(ns)…`);
+      await loadDownloads();
+    } catch (e) { toast.error(e.message); }
   }
 
   // ─── STORMBRINGER ────────────────────────────────────────
@@ -369,10 +403,22 @@
     <p class="text-sm mt-0.5" style="color:#5a5a78">Stormbringer · TideCaller · Transporter</p>
   </div>
 
-  <!-- Active downloads widget -->
-  {#if sbDownloads.length > 0 || tcDownloads.length > 0}
+  <!-- Fila unificada -->
+  {#if sbDownloads.length > 0 || tcDownloads.length > 0 || tpRuns.length > 0 || queueHistory.length > 0}
     <div class="rounded-2xl border p-4 space-y-3" style="background:#111118;border-color:#1e1e2e">
-      <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Downloads Ativos</div>
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Fila de downloads</div>
+        <button
+          class="flex items-center gap-1.5 text-2xs px-2 py-1 rounded-lg transition-all"
+          style={autoTransporter
+            ? 'background:rgba(29,185,84,0.12);color:#1db954'
+            : 'background:rgba(90,90,120,0.15);color:#5a5a78'}
+          onclick={toggleAutoTransporter}
+          title="Move os downloads pra biblioteca do Plex automaticamente ao concluir"
+        >
+          {autoTransporter ? '⇈ auto-transporte ON' : '⇈ auto-transporte OFF'}
+        </button>
+      </div>
 
       <!-- Stormbringer torrents -->
       {#each sbDownloads.slice(0,5) as t}
@@ -421,15 +467,24 @@
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-sm">🌊</span>
               <span class="text-xs font-medium text-white truncate">
-                {job.artistName ?? 'TideCaller'}
+                {job.artistName || 'TideCaller'}
               </span>
               <!-- status badge -->
               {#if job.status === 'running'}
                 <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(157,142,255,0.12);color:#9d8eff">baixando</span>
               {:else if job.status === 'done'}
                 <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(29,185,84,0.12);color:#1db954">✓ concluído</span>
+              {:else if job.status === 'cancelled'}
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(90,90,120,0.2);color:#5a5a78">cancelado</span>
               {:else}
                 <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(248,113,113,0.12);color:#f87171">✗ erro</span>
+              {/if}
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              {#if job.status === 'running'}
+                <Button size="xs" variant="ghost" onclick={() => tcCancel(job.jobId)}>cancelar</Button>
+              {:else if job.status === 'error'}
+                <Button size="xs" variant="ghost" onclick={() => tcRetry(job.jobId)}>↻ re-tentar</Button>
               {/if}
             </div>
             <span class="text-2xs shrink-0" style="color:#5a5a78">
@@ -467,6 +522,53 @@
           {/if}
         </div>
       {/each}
+
+      <!-- Transporter runs -->
+      {#each tpRuns as run}
+        <div class="flex items-center gap-3">
+          <span class="text-sm">🚚</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-white truncate">{run.title}</span>
+              {#if run.auto}
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:#38bdf8">auto</span>
+              {/if}
+            </div>
+          </div>
+          {#if run.status === 'running'}
+            <span class="text-2xs" style="color:#9d8eff">movendo…</span>
+          {:else if run.status === 'done'}
+            <span class="text-2xs" style="color:#1db954">✓ na biblioteca</span>
+          {:else}
+            <span class="text-2xs" style="color:#f87171">✗ erro</span>
+          {/if}
+        </div>
+      {/each}
+
+      <!-- Histórico persistido -->
+      {#if queueHistory.length > 0}
+        <details class="text-2xs">
+          <summary class="cursor-pointer select-none uppercase tracking-wider font-semibold" style="color:#5a5a78">
+            Histórico ({queueHistory.length})
+          </summary>
+          <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+            {#each queueHistory as h}
+              <div class="flex items-center gap-2">
+                <span style="color:{h.status === 'done' ? '#1db954' : h.status === 'cancelled' ? '#5a5a78' : '#f87171'}">
+                  {h.status === 'done' ? '✓' : h.status === 'cancelled' ? '○' : '✗'}
+                </span>
+                <span class="truncate flex-1" style="color:#8888a8">
+                  {#if h.source === 'torrent'}⚡{:else if h.source === 'tidal'}🌊{:else}🚚{/if}
+                  {h.title ?? h.id}
+                </span>
+                <span class="shrink-0" style="color:#3a3a58">
+                  {h.finishedAt ? new Date(h.finishedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                </span>
+              </div>
+            {/each}
+          </div>
+        </details>
+      {/if}
     </div>
   {/if}
 
