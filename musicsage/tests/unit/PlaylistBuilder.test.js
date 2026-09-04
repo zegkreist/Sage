@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { PlaylistBuilder } from "../../src/services/PlaylistBuilder.js";
+import { FavoritesService } from "../../src/services/FavoritesService.js";
 
 function makeAllFather(overrides = {}) {
   return { askForJSON: jest.fn(), ask: jest.fn(), ...overrides };
@@ -570,6 +571,34 @@ describe("PlaylistBuilder", () => {
       const selPrompt = af.askForJSON.mock.calls[0][0];
       expect(selPrompt).toContain("Asa Branca");
       expect(selPrompt).toContain("ONLY tracks from Brazil");
+    });
+  });
+  // ── filtro de favoritos (fase 4) ─────────────────────────────────────────
+
+  describe("generateFromCacheWithPrompt() com favoriteKeys", () => {
+    const CACHE_ENTRIES = [
+      { ratingKey: "30", title: "Money",        artist: "Pink Floyd", album: "The Dark Side of the Moon", analysis: { genre: "Rock", energy: 5 } },
+      { ratingKey: "31", title: "Karma Police", artist: "Radiohead",  album: "OK Computer",               analysis: { genre: "Rock", energy: 4 } },
+    ];
+    const analysisCache = { getAll: () => CACHE_ENTRIES };
+
+    it("estoura com mensagem acionável quando nenhuma faixa do cache é favorita", async () => {
+      const favoriteKeys = new Set([FavoritesService.makeKey("Ninguem", "Nada", "Nunca")]);
+
+      await expect(
+        builder.generateFromCacheWithPrompt("qualquer coisa", analysisCache, { favoriteKeys })
+      ).rejects.toThrow(/favorita/i);
+
+      // Filtrou antes de gastar chamada de LLM
+      expect(allfather.askForJSON).not.toHaveBeenCalled();
+    });
+
+    it("sem favoriteKeys não filtra o cache", async () => {
+      allfather.askForJSON.mockResolvedValue([30]);
+
+      await expect(
+        builder.generateFromCacheWithPrompt("qualquer coisa", analysisCache, {})
+      ).resolves.toBeDefined();
     });
   });
 });

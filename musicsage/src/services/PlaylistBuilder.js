@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../logger.js";
+import { FavoritesService } from "./FavoritesService.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Pasta de dados: data/playlists/ (relativa ao root do musicsage)
@@ -1215,13 +1216,28 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
    * @param {object} analysisCache    — instância de AnalysisCacheService
    * @returns {Promise<object>}        playlist com id, name, tracks[], createdAt, prompt
    */
-  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null, onProgress = null } = {}) {
+  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null, onProgress = null, favoriteKeys = null, candidateRatingKeys = null } = {}) {
     logger.info('PLAYLIST', `generateFromCacheWithPrompt()`, { prompt, maxPerArtist, discoveryRatio, sizeOverride });
     const report = (stage, pct) => onProgress?.(stage, pct);
 
-    const allEntries = analysisCache.getAll();
+    let allEntries = analysisCache.getAll();
     if (!allEntries.length) {
       throw new Error('Nenhuma faixa analisada no cache. Execute a análise da biblioteca primeiro.');
+    }
+    if (favoriteKeys) {
+      allEntries = allEntries.filter(e =>
+        favoriteKeys.has(FavoritesService.makeKey(e.artist, e.title, e.parentTitle || e.album)));
+      if (!allEntries.length) {
+        throw new Error('Nenhuma faixa favorita no cache. Favorite faixas primeiro (coração na lista de faixas).');
+      }
+    }
+    // Restringe o pool a um conjunto pré-selecionado de ratingKeys (ex: a semente
+    // de faixas pouco ouvidas da descoberta semanal)
+    if (candidateRatingKeys) {
+      allEntries = allEntries.filter(e => candidateRatingKeys.has(String(e.ratingKey)));
+      if (!allEntries.length) {
+        throw new Error('Nenhuma das faixas candidatas está no cache de análise.');
+      }
     }
 
     // ── Extração de parâmetros enriquecida (multilingual + constraints numéricas + sort intent) ──

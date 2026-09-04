@@ -230,6 +230,8 @@
                   artist={track.grandparentTitle ?? track.artist}
                   album={track.parentTitle ?? track.album}
                   playCount={track.viewCount ?? 0}
+                  favorite
+                  withRating
                 >
                   {#snippet actions()}
                     <Button size="xs" variant="danger" onclick={() => removeTrack(track.ratingKey)}>✕</Button>
@@ -336,6 +338,8 @@
                   artist={track.grandparentTitle ?? track.artist}
                   album={track.parentTitle ?? track.album}
                   playCount={track.viewCount ?? 0}
+                  favorite
+                  withRating
                 >
                   {#snippet actions()}
                     <Button size="xs" variant="danger" onclick={() => removeTrack(track.ratingKey)}>✕</Button>

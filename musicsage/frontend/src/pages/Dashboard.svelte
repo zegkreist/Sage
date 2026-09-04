@@ -1,15 +1,17 @@
 <script>
   import { onMount } from 'svelte';
-  import { api } from '$lib/api.js';
+  import { api, pollJob } from '$lib/api.js';
   import { toast } from '$lib/stores/toast.js';
   import { deriveMoodLabel, relTime } from '$lib/utils.js';
   import { users, selectedUserId } from '$lib/stores/user.js';
+  import { navigate } from '$lib/stores/router.js';
 
   import SectionBox        from '../components/layout/SectionBox.svelte';
   import StatCard          from '../components/ui/StatCard.svelte';
   import MoodBar           from '../components/ui/MoodBar.svelte';
   import TrackRow          from '../components/data/TrackRow.svelte';
   import Spinner           from '../components/ui/Spinner.svelte';
+  import Button            from '../components/ui/Button.svelte';
   import ShareStoryModal   from '../components/ui/ShareStoryModal.svelte';
 
   // ─── State ───────────────────────────────────────────────
@@ -20,6 +22,10 @@
   let moodMonth   = $state(null);
   let discoveries = $state([]);
   let subgenreDistrib = $state([]);  // [{ name, count, pct }]
+
+  let weekly          = $state(null);   // estado da descoberta semanal
+  let weeklyBusy      = $state(false);
+  let weeklyStage     = $state('');
 
   let loadingStats    = $state(true);
   let loadingMetrics  = $state(false);
@@ -73,8 +79,39 @@
       loadMood(),
       loadDiscoveries(),
       loadUsers(),
+      loadWeekly(),
     ]);
   });
+
+  async function loadWeekly() {
+    // Silencioso: o card some se o backend não tiver o serviço, sem poluir com toast
+    try { weekly = await api('GET', '/weekly'); }
+    catch { weekly = null; }
+  }
+
+  async function regenerateWeekly() {
+    weeklyBusy = true;
+    weeklyStage = 'Enviando pedido…';
+    try {
+      const started = await api('POST', '/weekly/run', {}, { timeoutMs: 30_000 });
+      await pollJob(started.jobId, (stage) => { weeklyStage = stage; });
+      toast.success('Descobertas da semana atualizadas!');
+    } catch (e) {
+      toast.error(`Descoberta semanal: ${e.message}`);
+    } finally {
+      weeklyBusy = false;
+      weeklyStage = '';
+      await loadWeekly();
+    }
+  }
+
+  async function toggleWeekly() {
+    try {
+      weekly = await api('PUT', '/weekly', { enabled: !weekly?.enabled });
+    } catch (e) { toast.error(`Descoberta semanal: ${e.message}`); }
+  }
+
+  const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 
   async function loadStats() {
     loadingStats = true;
@@ -462,6 +499,54 @@
       </div>
     {/if}
   </SectionBox>
+
+  <!-- ── 5. Descobertas da semana ─────────────────────────── -->
+  {#if weekly}
+    <SectionBox title="Descobertas da semana"
+                subtitle={weekly.enabled
+                  ? `Automático toda ${DIAS[weekly.dayOfWeek]} às ${String(weekly.hour).padStart(2, '0')}:00`
+                  : 'Automático desligado — dá para gerar na mão'}>
+      {#snippet actions()}
+        <Button size="xs" variant="ghost" onclick={toggleWeekly} disabled={weeklyBusy}
+                title={weekly.enabled ? 'Desligar o agendamento' : 'Ligar o agendamento semanal'}>
+          {weekly.enabled ? 'Desligar' : 'Ligar'}
+        </Button>
+        <Button size="xs" variant="secondary" onclick={regenerateWeekly}
+                loading={weeklyBusy} disabled={weeklyBusy}>
+          {weeklyBusy ? 'Gerando…' : 'Regenerar'}
+        </Button>
+      {/snippet}
+
+      {#if weeklyBusy}
+        <div class="flex items-center gap-2 text-sm" style="color:#8888a8">
+          <Spinner size="sm" />
+          {weeklyStage || 'Gerando…'}
+        </div>
+      {:else if weekly.lastPlaylist}
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="flex-1 min-w-0">
+            <button class="text-sm font-medium text-white truncate hover:text-accent transition-colors text-left"
+                    onclick={() => navigate('playlists')}>
+              {weekly.lastPlaylist.name}
+            </button>
+            <div class="text-2xs mt-0.5" style="color:#5a5a78">
+              {weekly.lastPlaylist.trackCount} faixas · {relTime(Math.round(weekly.lastPlaylist.createdAt / 1000))}
+              {#if !weekly.lastPlaylist.plexId} · <span style="color:#f59e0b">não sincronizada com o Plex</span>{/if}
+            </div>
+          </div>
+        </div>
+      {:else}
+        <div class="text-sm" style="color:#8888a8">Nenhuma descoberta gerada ainda</div>
+      {/if}
+
+      {#if weekly.lastError}
+        <div class="mt-3 rounded-xl px-3 py-2 text-2xs border"
+             style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+          Última tentativa falhou: {weekly.lastError.message}
+        </div>
+      {/if}
+    </SectionBox>
+  {/if}
 
   <!-- ── 5. Descobertas ───────────────────────────────────── -->
   {#if !loadingDisc && discoveries.length > 0}

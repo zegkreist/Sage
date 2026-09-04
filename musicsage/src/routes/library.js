@@ -10,7 +10,7 @@
  */
 import { logger } from "../logger.js";
 
-export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService }) {
+export function libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService, favoritesService }) {
   router.get("/library/stats", async (_req, res) => {
     // Rescan lazy: garante que não sirva zeros após cold start/falha transitória.
     // O scanner tem TTL + inflight — se o snapshot é recente, é de graça.
@@ -48,6 +48,7 @@ export function libraryRouter(router, { libraryScanner, historyService, metricsS
     try {
       const q     = (req.query.q     || "").toLowerCase().trim();
       const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+      const onlyFavorites = req.query.onlyFavorites === "1" || req.query.onlyFavorites === "true";
 
       const { tracks } = await libraryScanner.scan();
 
@@ -60,15 +61,24 @@ export function libraryRouter(router, { libraryScanner, historyService, metricsS
         );
       }
 
+      // Filtra antes do slice — senão o "só favoritos" só olharia as `limit` primeiras
+      if (onlyFavorites && favoritesService) {
+        filtered = filtered.filter(t =>
+          favoritesService.get(t.grandparentTitle, t.title, t.parentTitle)?.starred);
+      }
+
       const summary = filtered.slice(0, limit).map(t => {
         const plexPath = t.Media?.[0]?.Part?.[0]?.file || "";
         const filePath = audioAnalyzer ? audioAnalyzer._resolvePath(plexPath) || plexPath : plexPath;
+        const fav      = favoritesService?.get(t.grandparentTitle, t.title, t.parentTitle) || null;
         return {
           ratingKey: t.ratingKey,
           title:     t.title            || "",
           artist:    t.grandparentTitle || "",
           album:     t.parentTitle      || "",
           filePath,
+          starred:   !!fav?.starred,
+          rating:    fav?.rating ?? null,
         };
       });
       res.json({ tracks: summary });

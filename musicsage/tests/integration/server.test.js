@@ -1,5 +1,9 @@
 import { jest } from "@jest/globals";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { createServer } from "../../src/server.js";
+import { FavoritesService } from "../../src/services/FavoritesService.js";
 import supertest from "supertest";
 
 // ── Mocks de serviços ─────────────────────────────────────────────────────
@@ -430,5 +434,198 @@ describe("GET /api/embeddings/clusters", () => {
     const res = await supertest(localApp).get("/api/embeddings/clusters?k=2");
 
     expect(res.body.totalEmbedded).toBe(3);
+  });
+});
+
+// ── Curadoria pessoal (fase 4) ────────────────────────────────────────────
+
+describe("Favoritos", () => {
+  let dataDir;
+  let favoritesService;
+
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "musicsage-favroute-"));
+    favoritesService = new FavoritesService({ dataDir });
+  });
+
+  afterEach(() => {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const plexTrack = (artist, title, album) => ({
+    ratingKey: `${artist}-${title}`,
+    title,
+    grandparentTitle: artist,
+    parentTitle: album,
+  });
+
+  describe("GET /api/library/tracks", () => {
+    const scannerWith = (...tracks) => ({
+      scan: jest.fn().mockResolvedValue({ artists: [], albums: [], tracks }),
+      getArtistNames: jest.fn().mockReturnValue([]),
+    });
+
+    it("anota starred/rating em cada faixa", async () => {
+      favoritesService.setFavorite({ artist: "Portishead", title: "Roads", album: "Dummy" }, { starred: true, rating: 5 });
+      const app = createServer({
+        libraryScanner: scannerWith(plexTrack("Portishead", "Roads", "Dummy"), plexTrack("Air", "Sexy Boy", "Moon Safari")),
+        favoritesService,
+      });
+
+      const res = await supertest(app).get("/api/library/tracks");
+
+      expect(res.status).toBe(200);
+      expect(res.body.tracks).toHaveLength(2);
+      expect(res.body.tracks[0]).toMatchObject({ title: "Roads", starred: true, rating: 5 });
+      expect(res.body.tracks[1]).toMatchObject({ title: "Sexy Boy", starred: false, rating: null });
+    });
+
+    it("onlyFavorites=1 devolve só as faixas com coração", async () => {
+      favoritesService.setFavorite({ artist: "Portishead", title: "Roads", album: "Dummy" }, { starred: true });
+      const app = createServer({
+        libraryScanner: scannerWith(plexTrack("Portishead", "Roads", "Dummy"), plexTrack("Air", "Sexy Boy", "Moon Safari")),
+        favoritesService,
+      });
+
+      const res = await supertest(app).get("/api/library/tracks?onlyFavorites=1");
+
+      expect(res.status).toBe(200);
+      expect(res.body.tracks).toHaveLength(1);
+      expect(res.body.tracks[0].title).toBe("Roads");
+    });
+
+    it("filtra antes do limit — favorito fora das primeiras N ainda aparece", async () => {
+      favoritesService.setFavorite({ artist: "Air", title: "Sexy Boy", album: "Moon Safari" }, { starred: true });
+      const enchimento = Array.from({ length: 30 }, (_, i) => plexTrack("Enchimento", `T${i}`, "A"));
+      const app = createServer({
+        libraryScanner: scannerWith(...enchimento, plexTrack("Air", "Sexy Boy", "Moon Safari")),
+        favoritesService,
+      });
+
+      const res = await supertest(app).get("/api/library/tracks?onlyFavorites=1&limit=20");
+
+      expect(res.body.tracks).toHaveLength(1);
+      expect(res.body.tracks[0].title).toBe("Sexy Boy");
+    });
+
+    it("nota sem coração não entra no filtro de favoritos", async () => {
+      favoritesService.setFavorite({ artist: "Air", title: "Sexy Boy", album: "Moon Safari" }, { rating: 4 });
+      const app = createServer({
+        libraryScanner: scannerWith(plexTrack("Air", "Sexy Boy", "Moon Safari")),
+        favoritesService,
+      });
+
+      const res = await supertest(app).get("/api/library/tracks?onlyFavorites=1");
+
+      expect(res.body.tracks).toHaveLength(0);
+    });
+  });
+
+  describe("POST /api/playlists/from-cache-prompt", () => {
+    const makeBuilder = () => ({
+      generateFromCacheWithPrompt: jest.fn().mockResolvedValue({ id: "p1", name: "Mix", tracks: [] }),
+      save: jest.fn().mockImplementation((p) => ({ ...p, id: "saved-1" })),
+      update: jest.fn(),
+    });
+    const analysisCache = { getAll: jest.fn().mockReturnValue([]) };
+
+    it("onlyFavorites passa favoriteKeys com as chaves estreladas ao builder", async () => {
+      favoritesService.setFavorite({ artist: "Portishead", title: "Roads", album: "Dummy" }, { starred: true });
+      const playlistBuilder = makeBuilder();
+      const app = createServer({ playlistBuilder, analysisCache, favoritesService });
+
+      const res = await supertest(app)
+        .post("/api/playlists/from-cache-prompt")
+        .send({ prompt: "algo melancólico", onlyFavorites: true });
+
+      expect(res.status).toBe(201);
+      const opts = playlistBuilder.generateFromCacheWithPrompt.mock.calls[0][2];
+      expect(opts.favoriteKeys).toBeInstanceOf(Set);
+      expect(opts.favoriteKeys.has(FavoritesService.makeKey("Portishead", "Roads", "Dummy"))).toBe(true);
+    });
+
+    it("sem onlyFavorites o builder não recebe favoriteKeys", async () => {
+      const playlistBuilder = makeBuilder();
+      const app = createServer({ playlistBuilder, analysisCache, favoritesService });
+
+      await supertest(app).post("/api/playlists/from-cache-prompt").send({ prompt: "algo alegre" });
+
+      const opts = playlistBuilder.generateFromCacheWithPrompt.mock.calls[0][2];
+      expect(opts.favoriteKeys).toBeUndefined();
+    });
+  });
+});
+
+// ── Descoberta semanal (fase 5) ───────────────────────────────────────────
+
+describe("Descoberta semanal", () => {
+  const makeWeekly = (over = {}) => ({
+    status: jest.fn().mockReturnValue({ enabled: false, dayOfWeek: 1, hour: 7, running: false, nextRunAt: null }),
+    updateSettings: jest.fn().mockImplementation((patch) => ({ enabled: false, dayOfWeek: 1, hour: 7, ...patch })),
+    run: jest.fn().mockResolvedValue({ id: "pl-1", name: "Descobertas", trackCount: 20 }),
+    ...over,
+  });
+
+  it("GET /api/weekly devolve o estado do agendador", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).get("/api/weekly");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ enabled: false, dayOfWeek: 1, hour: 7 });
+  });
+
+  it("GET /api/weekly devolve 503 sem o serviço", async () => {
+    const res = await supertest(createServer({})).get("/api/weekly");
+    expect(res.status).toBe(503);
+  });
+
+  it("PUT /api/weekly aplica os ajustes válidos", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).put("/api/weekly").send({ enabled: true, dayOfWeek: 5, hour: 20 });
+
+    expect(res.status).toBe(200);
+    expect(weeklyDiscoveryService.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, dayOfWeek: 5, hour: 20 })
+    );
+  });
+
+  it.each([
+    ["dayOfWeek", { dayOfWeek: 9 }],
+    ["hour",      { hour: 42 }],
+    ["size",      { size: 1 }],
+  ])("PUT /api/weekly rejeita %s fora da faixa", async (_campo, body) => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).put("/api/weekly").send(body);
+
+    expect(res.status).toBe(400);
+    expect(weeklyDiscoveryService.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/weekly/run devolve 202 com jobId", async () => {
+    const weeklyDiscoveryService = makeWeekly();
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).post("/api/weekly/run");
+
+    expect(res.status).toBe(202);
+    expect(res.body.jobId).toEqual(expect.any(String));
+  });
+
+  it("POST /api/weekly/run devolve 409 se já está rodando", async () => {
+    const weeklyDiscoveryService = makeWeekly({
+      status: jest.fn().mockReturnValue({ running: true }),
+    });
+    const app = createServer({ weeklyDiscoveryService });
+
+    const res = await supertest(app).post("/api/weekly/run");
+
+    expect(res.status).toBe(409);
+    expect(weeklyDiscoveryService.run).not.toHaveBeenCalled();
   });
 });
