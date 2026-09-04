@@ -108,4 +108,6 @@ max_search_results = 100
 
 [misc]
 version = "2.0.6"
-check_for_updates = true
+# Update check do streamrip bate em api.github.com antes de cada download —
+# sem saída pro GitHub o timeout aborta o álbum inteiro. Desativado.
+check_for_updates = false

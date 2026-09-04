@@ -209,6 +209,47 @@ def _expected_tracks(album) -> int | None:
         return None
 
 
+def _ensure_config_exists():
+    """Cria o config.toml a partir do template quando não existe (streamrip
+    rodando com defaults tem update check ligado, que aborta o download sem
+    saída pro GitHub)."""
+    if CONFIG_TOML.exists():
+        return
+    template = AGENT_DIR / "setup" / "config.toml.template"
+    if not template.exists():
+        return
+    try:
+        CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_TOML.write_text(
+            template.read_text(encoding="utf-8").replace("__AGENT_DIR__", str(AGENT_DIR)),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _patch_config_updates():
+    """Desativa o update check do streamrip ([misc] check_for_updates) —
+    ele bate em api.github.com antes de cada download e o timeout aborta
+    o álbum inteiro quando não há saída pro GitHub."""
+    if not CONFIG_TOML.exists():
+        return
+    try:
+        text = CONFIG_TOML.read_text(encoding="utf-8")
+        original = text
+        if re.search(r'(?m)^\[misc\]', text):
+            if re.search(r'(?m)^check_for_updates\s*=', text):
+                text = re.sub(r'(?m)^(check_for_updates\s*=\s*)true', r'\g<1>false', text)
+            else:
+                text = re.sub(r'(?m)^(\[misc\]\n)', r'\1check_for_updates = false\n', text, count=1)
+        else:
+            text += "\n[misc]\ncheck_for_updates = false\n"
+        if text != original:
+            CONFIG_TOML.write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _patch_config_databases():
     """
     Desativa os bancos de estado do streamrip (downloads.db/failed_downloads.db).
@@ -385,6 +426,8 @@ def main():
     print()
 
     # ── 6. Baixar ─────────────────────────────────────────────────────────────
+    _ensure_config_exists()
+    _patch_config_updates()
     _patch_config_databases()
     ok = 0
     fail = 0

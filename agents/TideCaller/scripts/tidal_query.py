@@ -50,6 +50,54 @@ def _has_new_audio_file(download_dir: str, since: float) -> bool:
     return False
 
 
+def _ensure_config_exists():
+    """
+    Cria o config.toml a partir do template quando ele não existe.
+    Sem isso o streamrip roda com defaults (update check ligado) e os
+    patches abaixo não têm onde escrever — no container o config pode
+    não ter vindo do setup.
+    """
+    if CONFIG_TOML.exists():
+        return
+    template = SCRIPT_DIR.parent / "setup" / "config.toml.template"
+    if not template.exists():
+        sys.stderr.write("[WARN] config.toml ausente e template não encontrado\n")
+        return
+    try:
+        CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_TOML.write_text(
+            template.read_text(encoding="utf-8").replace("__AGENT_DIR__", str(AGENT_DIR)),
+            encoding="utf-8",
+        )
+        sys.stderr.write(f"[INFO] config.toml criado a partir do template: {CONFIG_TOML}\n")
+    except Exception as e:
+        sys.stderr.write(f"[WARN] falha ao criar config.toml: {e}\n")
+
+
+def _patch_config_updates():
+    """
+    Desativa o update check do streamrip ([misc] check_for_updates).
+    O check bate em api.github.com antes de CADA download; sem saída pro
+    GitHub o ConnectionTimeoutError estoura e aborta o álbum inteiro.
+    """
+    if not CONFIG_TOML.exists():
+        return
+    try:
+        text = CONFIG_TOML.read_text(encoding="utf-8")
+        original = text
+        if re.search(r'(?m)^\[misc\]', text):
+            if re.search(r'(?m)^check_for_updates\s*=', text):
+                text = re.sub(r'(?m)^(check_for_updates\s*=\s*)true', r'\g<1>false', text)
+            else:
+                text = re.sub(r'(?m)^(\[misc\]\n)', r'\1check_for_updates = false\n', text, count=1)
+        else:
+            text += "\n[misc]\ncheck_for_updates = false\n"
+        if text != original:
+            CONFIG_TOML.write_text(text, encoding="utf-8")
+    except Exception:
+        pass  # Não bloquear o download por falha de patch
+
+
 def _patch_config_quality():
     """
     Garante que o config.toml do streamrip tem quality=3 para Tidal.
@@ -423,7 +471,9 @@ def _download_once(rip_bin: str, url: str, env: dict, major_ver: int,
 
 
 def cmd_download_albums(album_ids: list[str]):
-    _patch_config_quality()  # garantir quality=1
+    _ensure_config_exists()
+    _patch_config_updates()   # update check do GitHub não pode abortar o download
+    _patch_config_quality()   # garantir quality=1
     _patch_config_databases()
     # Refrescar o access_token antes de rodar o rip (o token real do Tidal expira
     # bem mais rápido que isso — não confiar em um expiry fixo)
