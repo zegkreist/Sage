@@ -44,3 +44,29 @@ export const post = (path, body)  => api('POST',   path, body);
 export const put  = (path, body)  => api('PUT',    path, body);
 export const del  = (path)        => api('DELETE', path);
 export const patch = (path, body) => api('PATCH',  path, body);
+
+/**
+ * Acompanha um job em background até terminar (POST que respondeu { jobId }).
+ * @param {string} jobId
+ * @param {(stage: string, pct: number) => void} [onProgress]
+ * @param {{intervalMs?: number, timeoutMs?: number}} [opts]
+ * @returns {Promise<*>} job.result quando status=done
+ */
+export function pollJob(jobId, onProgress = null, { intervalMs = 1500, timeoutMs = 600_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const tick = async () => {
+      try {
+        const job = await api('GET', `/jobs/${jobId}`);
+        if (job.status === 'done') return resolve(job.result);
+        if (job.status === 'error') return reject(new Error(job.error || 'Falha na geração'));
+        if (Date.now() - startedAt > timeoutMs) {
+          return reject(new Error('Tempo esgotado aguardando a geração'));
+        }
+        onProgress?.(job.stage ?? '', job.pct ?? 0);
+        setTimeout(tick, intervalMs);
+      } catch (e) { reject(e); }
+    };
+    tick();
+  });
+}

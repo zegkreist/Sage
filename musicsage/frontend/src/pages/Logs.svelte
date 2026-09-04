@@ -15,6 +15,7 @@
   let refreshId    = null;
   let logEl        = $state(null);   // bind:this para o container de scroll
   let autoScroll   = $state(true);
+  let todayOffset  = 0;              // polling incremental — bytes já recebidos do log de hoje
 
   const LEVEL_COLOR = {
     INFO:  'color:#1db954',
@@ -42,6 +43,7 @@
       ]);
       files        = filesRes.files ?? [];
       lines        = linesRes.lines ?? [];
+      todayOffset  = linesRes.nextOffset ?? 0;
       selectedFile = null;
     } catch (e) {
       toast.error(`Logs: ${e.message}`);
@@ -56,6 +58,7 @@
       if (!name) {
         const t  = await api('GET', '/logs/today');
         lines    = t.lines ?? [];
+        todayOffset = t.nextOffset ?? 0;
         selectedFile = null;
       } else {
         const t  = await api('GET', `/logs/file/${encodeURIComponent(name)}`);
@@ -71,18 +74,24 @@
   }
 
   async function refreshLines() {
-    loadingLines = true;
     try {
       if (!selectedFile) {
-        const t = await api('GET', '/logs/today');
-        lines   = t.lines ?? [];
+        // Incremental: pede só as linhas novas desde o último offset
+        const t = await api('GET', `/logs/today?offset=${todayOffset}`);
+        if (t.truncated) {
+          lines = t.lines ?? [];               // log zerado/rotacionado — recarrega do zero
+        } else if ((t.lines ?? []).length) {
+          lines = [...lines, ...(t.lines ?? [])];
+          // Guarda contra crescimento infinito do array em sessões muito longas
+          if (lines.length > 5000) lines = lines.slice(-5000);
+        }
+        todayOffset = t.nextOffset ?? todayOffset;
       } else {
         const t = await api('GET', `/logs/file/${encodeURIComponent(selectedFile)}`);
         lines   = t.lines ?? [];
       }
       if (autoScroll) scrollToBottom();
-    } catch { /* silent */ }
-    finally { loadingLines = false; }
+    } catch { /* silent — polling */ }
   }
 
   function toggleAutoRefresh() {

@@ -11,6 +11,8 @@ import { audioRouter } from "./routes/audio.js";
 import { logsRouter } from "./routes/logs.js";
 import { plexRouter } from "./routes/plex.js";
 import { lyricsRouter } from "./routes/lyrics.js";
+import { jobsRouter } from "./routes/jobs.js";
+import { JobRunner } from "./services/JobRunner.js";
 import { logger } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,16 +46,19 @@ export function createServer({ libraryScanner, historyService, recommendationEng
     next();
   });
 
+  const jobRunner = new JobRunner();
+
   healthRouter(router);
   logsRouter(router);
   libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService });
-  recommendationsRouter(router, { recommendationEngine });
-  playlistsRouter(router, { playlistBuilder, plexService, analysisCache });
+  recommendationsRouter(router, { recommendationEngine, jobRunner });
+  playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner });
   embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });
   audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner });
   lyricsRouter(router, { lyricsService, libraryScanner });
   toolsRouter(router);
   plexRouter(router, { plexService });
+  jobsRouter(router, { jobRunner });
 
   app.use("/api", router);
 

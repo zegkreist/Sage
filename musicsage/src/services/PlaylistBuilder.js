@@ -237,8 +237,10 @@ export class PlaylistBuilder {
    * @param {string} prompt — texto livre do usuário
    * @returns {Promise<{id, name, mood, genre, tracks[], createdAt, prompt}>}
    */
-  async generateFromPrompt(prompt) {
+  async generateFromPrompt(prompt, { onProgress = null } = {}) {
     logger.info("PLAYLIST", `generateFromPrompt() chamado`, { prompt });
+    const report = (stage, pct) => onProgress?.(stage, pct);
+    report('Interpretando o pedido…', 10);
 
     // Busca um número generoso de candidatos por similaridade; é barato (O(n) no store).
     // O valor final é recortado para max(size*4, 200) após conhecermos o size real.
@@ -329,6 +331,7 @@ Return a JSON object with these exact fields (use null for fields not mentioned)
     try {
       const t0 = Date.now();
       const BATCH_SIZE = 50;
+      report(`Selecionando faixas (${candidates.length} candidatas)…`, 50);
       const selectedTracks = candidates.length <= BATCH_SIZE
         ? await this._selectTracksOllama(candidates, criteria, size, region)
         : await this._selectTracksTournament(candidates, criteria, size, BATCH_SIZE, region);
@@ -1126,7 +1129,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
    * Torneio de seleção em lotes sobre entradas do cache.
    * @private
    */
-  async _selectCachedTracksTournament(entries, criteria, size, batchSize = 25) {
+  async _selectCachedTracksTournament(entries, criteria, size, batchSize = 25, { onBatch = null } = {}) {
     const batches = [];
     for (let i = 0; i < entries.length; i += batchSize) {
       batches.push(entries.slice(i, i + batchSize));
@@ -1139,6 +1142,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
     const seen = new Set();
     for (const [i, batch] of batches.entries()) {
       logger.debug('PLAYLIST', `Cache lote ${i + 1}/${batches.length}: ${batch.length} faixas`);
+      onBatch?.(i, batches.length);
       const picks = await this._selectCachedTracksOllama(batch, criteria, nPerBatch);
       for (const e of picks) {
         const key = String(e.ratingKey);
@@ -1211,8 +1215,9 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
    * @param {object} analysisCache    — instância de AnalysisCacheService
    * @returns {Promise<object>}        playlist com id, name, tracks[], createdAt, prompt
    */
-  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null } = {}) {
+  async generateFromCacheWithPrompt(prompt, analysisCache, { maxPerArtist = 3, discoveryRatio = 0, size: sizeOverride = null, onProgress = null } = {}) {
     logger.info('PLAYLIST', `generateFromCacheWithPrompt()`, { prompt, maxPerArtist, discoveryRatio, sizeOverride });
+    const report = (stage, pct) => onProgress?.(stage, pct);
 
     const allEntries = analysisCache.getAll();
     if (!allEntries.length) {
@@ -1315,6 +1320,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
     logger.info('PLAYLIST', `Parâmetros extraídos do prompt`, { ...params, size });
 
     // ── Pré-filtro score-based (rede larga: score por gênero/mood + aleatórios) ──────
+    report('Interpretando o pedido…', 10);
     let candidates = this._preFilterCacheEntries(allEntries, {
       genre: params.genre, genreTerms: Array.isArray(params.genre_terms) ? params.genre_terms : null,
       mood: params.mood, energy: null, size,
@@ -1322,6 +1328,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
 
     // ── LLM genre filter — refina semanticamente o pool por gênero (batches paralelos) ─
     if (params.genre) {
+      report('Filtrando por gênero…', 25);
       const genreLabel = [params.genre, ...(Array.isArray(params.genre_terms) ? params.genre_terms : [])]
         .filter(Boolean).join(', ');
       const llmFiltered = await this._llmGenreFilter(candidates, genreLabel, size);
@@ -1365,9 +1372,14 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
 
     const BATCH     = 25;
     const t0        = Date.now();
+    report(`Selecionando faixas (${candidates.length} candidatas)…`, 45);
     let selected    = candidates.length <= BATCH
       ? await this._selectCachedTracksOllama(candidates, criteria, size)
-      : await this._selectCachedTracksTournament(candidates, criteria, size, BATCH);
+      : await this._selectCachedTracksTournament(candidates, criteria, size, BATCH, {
+          onBatch: (doneBatches, totalBatches) =>
+            report(`Selecionando faixas — lote ${doneBatches}/${totalBatches}…`,
+                   45 + Math.round((doneBatches / Math.max(1, totalBatches)) * 35)),
+        });
     logger.debug('OLLAMA', `Cache prompt seleção em ${Date.now() - t0}ms`);
 
     // Pós-processamento: max por artista
@@ -1403,6 +1415,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
       source:    'cache-prompt',
     };
     logger.info('PLAYLIST', `Playlist por prompt (cache): "${playlist.name}" — ${playlist.tracks.length} faixas`);
+    report('Montando a playlist…', 95);
     return playlist;
   }
 
@@ -1419,8 +1432,10 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
    * @param {{ size?: number, name?: string }} options
    * @returns {Promise<object>}
    */
-  async generateFromCacheWithTrack(referenceAnalysis, referenceTitle, referenceRatingKey, analysisCache, { size = 15, name, maxPerArtist = 3, discoveryRatio = 0.3 } = {}) {
+  async generateFromCacheWithTrack(referenceAnalysis, referenceTitle, referenceRatingKey, analysisCache, { size = 15, name, maxPerArtist = 3, discoveryRatio = 0.3, onProgress = null } = {}) {
     logger.info('PLAYLIST', `generateFromCacheWithTrack()`, { referenceTitle, size, maxPerArtist, discoveryRatio });
+    const report = (stage, pct) => onProgress?.(stage, pct);
+    report('Montando o perfil da faixa…', 10);
 
     const allEntries = analysisCache.getAll();
     if (!allEntries.length) {
@@ -1441,6 +1456,7 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
 
     // Filtro LLM de gênero
     if (refGenre) {
+      report('Buscando sonoridades similares…', 30);
       const genreLabel = a.subgenre && a.subgenre !== 'unknown'
         ? `${refGenre}, ${a.subgenre}` : refGenre;
       const llmFiltered = await this._llmGenreFilter(candidates, genreLabel, size);
@@ -1483,9 +1499,14 @@ Return ONLY a JSON array of the numeric track IDs of the selected tracks. Exampl
 
     const BATCH = 25;
     const t0    = Date.now();
+    report(`Selecionando faixas similares (${candidates.length} candidatas)…`, 50);
     let selected = candidates.length <= BATCH
       ? await this._selectCachedTracksOllama(candidates, criteria, size)
-      : await this._selectCachedTracksTournament(candidates, criteria, size, BATCH);
+      : await this._selectCachedTracksTournament(candidates, criteria, size, BATCH, {
+          onBatch: (doneBatches, totalBatches) =>
+            report(`Selecionando similares — lote ${doneBatches}/${totalBatches}…`,
+                   50 + Math.round((doneBatches / Math.max(1, totalBatches)) * 30)),
+        });
     logger.debug('OLLAMA', `Radio cache seleção em ${Date.now() - t0}ms`);
 
     // Pós-processamento: max por artista
