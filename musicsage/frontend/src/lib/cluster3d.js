@@ -148,19 +148,80 @@ export function startRenderer3D(canvas, clusters, opts = {}) {
     scaleZ = Math.max(80, Math.min(800, scaleZ * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
   }, { passive: false });
 
-  canvas.addEventListener('click', (e) => {
+  const pickClusterAt = (x, y) => {
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const mx = x - rect.left;
+    const my = y - rect.top;
     let best = null, bestD2 = 144;
     proj2D.forEach(({ sx, sy }, i) => {
       const d2 = (sx - mx) ** 2 + (sy - my) ** 2;
       if (d2 < bestD2) { bestD2 = d2; best = i; }
     });
-    const cid = best !== null ? points[best].cid : null;
+    return best !== null ? points[best].cid : null;
+  };
+
+  canvas.addEventListener('click', (e) => {
+    const cid = pickClusterAt(e.clientX, e.clientY);
     selectedId = cid;
     opts.onSelectCluster?.(cid);
   });
+
+  // ── Touch (drag = rotacionar, pinch = zoom, tap = selecionar cluster) ──
+  let pinchDist = 0;
+  let touchMoved = false;
+
+  const onTouchStart = (e) => {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      autoRotate = false;
+      touchMoved = false;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      pinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  };
+  canvas.addEventListener('touchstart', onTouchStart, { passive: true });
+
+  const onTouchMove = (e) => {
+    if (e.touches.length === 1 && isDragging) {
+      e.preventDefault();
+      touchMoved = true;
+      theta -= (e.touches[0].clientX - lastX) * 0.008;
+      phi    = Math.max(0.05, Math.min(Math.PI - 0.05, phi + (e.touches[0].clientY - lastY) * 0.008));
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      e.preventDefault();
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (pinchDist > 0) {
+        scaleZ = Math.max(80, Math.min(800, scaleZ * (d / pinchDist)));
+      }
+      pinchDist = d;
+    }
+  };
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+
+  const onTouchEnd = (e) => {
+    if (e.touches.length === 0) {
+      isDragging = false;
+      pinchDist = 0;
+      if (!touchMoved) {
+        const t = e.changedTouches[0];
+        const cid = pickClusterAt(t.clientX, t.clientY);
+        selectedId = cid;
+        opts.onSelectCluster?.(cid);
+      }
+    }
+  };
+  canvas.addEventListener('touchend', onTouchEnd);
 
   loop();
 
@@ -171,6 +232,9 @@ export function startRenderer3D(canvas, clusters, opts = {}) {
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
     },
   };
 }

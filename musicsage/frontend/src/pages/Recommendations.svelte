@@ -58,7 +58,7 @@
       const list = await api('POST', '/recommendations/by-prompt', {
         prompt: promptQuery.trim(),
         limit:  10,
-      });
+      }, { timeoutMs: 600_000 });
       promptRecs = (Array.isArray(list) ? list : []).map(r => ({
         name:           r.name   ?? r.artist ?? '?',
         genre:          r.genre  ?? '',
@@ -93,7 +93,7 @@
       const pl = await api('POST', '/playlists/from-prompt', {
         prompt: `Músicas do artista ${artist} que estão na minha biblioteca`,
         maxPerArtist: 5,
-      });
+      }, { timeoutMs: 600_000 });
       toast.success(`Playlist "${pl.title ?? pl.name}" criada!`);
       navigate('playlists');
     } catch (e) { toast.error(e.message); }
@@ -228,7 +228,7 @@
                     {/if}
                   </div>
                 </div>
-                <div class="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
@@ -290,7 +290,7 @@
                   <span class="text-2xs px-2 py-0.5 rounded font-medium shrink-0"
                         style="background:rgba(88,88,120,0.2);color:#5a5a78">Fora</span>
                 {/if}
-                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <div class="actions-reveal flex gap-1 shrink-0">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs transition-colors"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
@@ -402,7 +402,7 @@
                 {#if a.inLibrary}
                   <div class="text-2xs mt-1 font-medium" style="color:#1db954">Na biblioteca</div>
                 {/if}
-                <div class="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', a.name)}>∿</button>

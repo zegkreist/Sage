@@ -35,7 +35,7 @@
         discoveryRatio,
         size: promptSize,
         random: useRandom,
-      });
+      }, { timeoutMs: 600_000 });
       toast.success(`Playlist "${promptResult.title ?? promptResult.name}" criada!`);
     } catch (e) {
       promptError = e.message;
@@ -86,7 +86,7 @@
         size:          trackLimit,
         maxPerArtist:  trackMaxPerArtist,
         discoveryRatio: trackDiscovery,
-      });
+      }, { timeoutMs: 600_000 });
       toast.success(`Playlist "${trackResult.title ?? trackResult.name}" criada!`);
     } catch (e) {
       trackError = e.message;
@@ -147,7 +147,7 @@
           ></textarea>
         </div>
 
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label for="prompt-size" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Nº de músicas</label>
             <input id="prompt-size" type="number" bind:value={promptSize} min="5" max="200"
@@ -259,7 +259,7 @@
           </div>
         {/if}
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label for="track-limit" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Tamanho da playlist</label>
             <input id="track-limit" type="number" bind:value={trackLimit} min="5" max="100"

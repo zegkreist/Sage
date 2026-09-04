@@ -178,7 +178,7 @@
       </div>
 
       <!-- Viz + detail -->
-      <div class="flex gap-4">
+      <div class="flex flex-col lg:flex-row gap-4">
 
         <!-- Visualization -->
         <div class="flex-1 min-w-0 rounded-2xl border overflow-hidden relative"
@@ -205,7 +205,7 @@
         </div>
 
         <!-- Right column -->
-        <div class="w-60 shrink-0 flex flex-col gap-3">
+        <div class="w-full lg:w-60 shrink-0 flex flex-col gap-3">
 
           <!-- Legend -->
           <div class="rounded-2xl border p-3" style="background:#111118;border-color:#1e1e2e">
