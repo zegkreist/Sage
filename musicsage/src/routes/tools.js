@@ -15,7 +15,7 @@
  *   POST /api/tools/transporter/run            — move downloads para o Plex
  */
 import { randomUUID } from "crypto";
-import { readFileSync, readdirSync, existsSync } from "fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawn, execFile } from "child_process";
@@ -165,6 +165,21 @@ async function getDmInstance() {
   if (!_dmInstance) {
     _dmInstance = new _DownloadManagerClass(loadStormbringerConfig());
     _dmInstance.setLogger((level, msg) => logger[level]("STORMBRINGER", msg));
+    // Fila unificada: torrent concluído/falho vai pro histórico e dispara
+    // o Transporter automaticamente (se o toggle estiver ligado)
+    _dmInstance.on("completed", (ti) => {
+      _pushQueueHistory({ source: "torrent", id: ti?.infoHash, title: ti?.name, status: "done" });
+      if (!_autoTransporter) return;
+      const typeMap = { music: "music", movie: "movies", movies: "movies", series: "series", tv: "series" };
+      const target = typeMap[ti?.type];
+      if (target) runTransporter(target, { auto: true });
+    });
+    _dmInstance.on("error", ({ torrentInfo, error } = {}) => {
+      _pushQueueHistory({
+        source: "torrent", id: torrentInfo?.infoHash, title: torrentInfo?.name, status: "error",
+        error: String(error?.message || error || "").slice(0, 200),
+      });
+    });
   }
   return _dmInstance;
 }
@@ -174,8 +189,83 @@ const _oauthSessions = new Map();
 
 // Jobs do TideCaller em andamento / histórico recente (limpos após 30 min)
 const _tidalJobs = new Map();
+// Processos do TideCaller por jobId (para cancelamento)
+const _tidalProcs = new Map();
 // Path do state file do Stormbringer
 const SB_STATE_FILE = loadStormbringerConfig().downloads.stateFile;
+
+// ── Fila unificada: Transporter rastreado + histórico + toggle ─────────────
+const _transporterRuns = new Map();   // id → run {id,type,status,startedAt,...}
+const _DATA_DIR = process.env.DATA_DIR || join(__dirname, "../../data");
+const _QUEUE_HISTORY_FILE = join(_DATA_DIR, "queue-history.json");
+const _SETTINGS_FILE = join(_DATA_DIR, "settings.json");
+const _QUEUE_HISTORY_MAX = 100;
+
+function _readJsonSafe(file, fallback) {
+  try { return JSON.parse(readFileSync(file, "utf8")); } catch { return fallback; }
+}
+function _writeJsonSafe(file, data) {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (err) { logger.warn("SERVER", `Falha ao gravar ${file}: ${err.message}`); }
+}
+let _autoTransporter = _readJsonSafe(_SETTINGS_FILE, {}).autoTransporter !== false;
+
+function _pushQueueHistory(entry) {
+  const hist = _readJsonSafe(_QUEUE_HISTORY_FILE, []);
+  hist.unshift({ ...entry, finishedAt: entry.finishedAt || new Date().toISOString() });
+  _writeJsonSafe(_QUEUE_HISTORY_FILE, hist.slice(0, _QUEUE_HISTORY_MAX));
+}
+
+/** Executa o Transporter rastreado (status + histórico). Dedup por target. */
+function runTransporter(type, { auto = false } = {}) {
+  for (const r of _transporterRuns.values()) {
+    if (r.status === "running" && r.type === type) {
+      logger.info("SERVER", `Transporter (${type}) já em andamento — gatilho ${auto ? "automático" : "manual"} ignorado`);
+      return null;
+    }
+  }
+  const flagMap = { music: ["--music"], movies: ["--movies"], series: ["--series"], all: [] };
+  const flags = flagMap[type] ?? ["--music"];
+  const id = randomUUID();
+  const run = {
+    id, source: "transporter", type,
+    title: `Transporter — ${type}`,
+    status: "running",
+    startedAt: new Date().toISOString(),
+    finishedAt: null, exitCode: null, lastError: null, auto,
+  };
+  _transporterRuns.set(id, run);
+  const _dl = process.env.DOWNLOADS_DIR || "/downloads";
+  const _media = process.env.PLEX_MEDIA_PATH || "/media";
+  logger.info("SERVER", `Transporter (${type}, ${auto ? "auto" : "manual"}) — origem: ${_dl} → destino: ${_media}`);
+
+  const child = spawn("node", ["src/run.js", ...flags], {
+    cwd: TRANSPORTER_DIR,
+    env: { ...process.env, DOWNLOADS_DIR: _dl, PLEX_MEDIA_PATH: _media },
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: true,
+  });
+  let stderrTail = "";
+  child.stderr?.on("data", c => { stderrTail = (stderrTail + c.toString()).slice(-500); });
+  child.on("close", (code) => {
+    run.finishedAt = new Date().toISOString();
+    run.exitCode = code;
+    run.status = code === 0 ? "done" : "error";
+    if (code !== 0) run.lastError = stderrTail.trim() || `exit ${code}`;
+    logger.info("SERVER", `Transporter (${type}) ${run.status} código=${code}`);
+    _pushQueueHistory({ source: "transporter", id, title: run.title, status: run.status, finishedAt: run.finishedAt, error: run.lastError });
+    setTimeout(() => _transporterRuns.delete(id), 30 * 60 * 1000);
+  });
+  child.on("error", (err) => {
+    run.status = "error";
+    run.lastError = err.message;
+    run.finishedAt = new Date().toISOString();
+  });
+  child.unref();
+  return run;
+}
 
 // Python venv do TideCaller.
 // Em container o venv pode não existir (deps instaladas no Python do sistema);
@@ -243,6 +333,7 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
   const proc = spawn(TC_PYTHON, [TC_QUERY, "download-albums", ...ids], {
     cwd: TIDECALLER_DIR, env, stdio: ["ignore", "pipe", "pipe"],
   });
+  _tidalProcs.set(jobId, proc);
 
   let buf = "";
   proc.stdout.on("data", chunk => {
@@ -280,6 +371,7 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
   let _stderrBuf = "";
   proc.stderr.on("data", chunk => { _stderrBuf += chunk.toString(); job.lastError = _stderrBuf.slice(-500); });
   proc.on("close", code => {
+    _tidalProcs.delete(jobId);
     job.finishedAt = new Date().toISOString();
     // Albums still "pending" at close: mark as error (if they got no JSON status they didn't download)
     job.albums.forEach(a => { if (a.status === "pending") a.status = "error"; });
@@ -289,6 +381,9 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
     const icon  = job.status === "done" ? "✓" : "✗";
     logger.info("SERVER", `TideCaller download ${icon} jobId=${jobId} ${label} — ok=${done} erros=${error} (código=${code})`);
     if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);
+    _pushQueueHistory({ source: "tidal", id: jobId, title: label, status: job.status, finishedAt: job.finishedAt, error: job.lastError });
+    // Fila unificada: downloads do Tidal prontos → transporta pra biblioteca
+    if (_autoTransporter && job.status === "done") runTransporter("music", { auto: true });
     // Limpar após 60 min
     setTimeout(() => _tidalJobs.delete(jobId), 60 * 60 * 1000);
   });
@@ -779,16 +874,10 @@ export function toolsRouter(router) {
   // Body: { type: "music" | "movies" | "series" | "all" }
   router.post("/tools/transporter/run", async (req, res) => {
     const { type = "music" } = req.body || {};
-    const flagMap = { music: ["--music"], movies: ["--movies"], series: ["--series"], all: [] };
-    const flags = flagMap[type] ?? ["--music"];
-    const _dl = process.env.DOWNLOADS_DIR || "/downloads";
-    const _media = process.env.PLEX_MEDIA_PATH || "/media";
-    logger.info("SERVER", `Transporter (${type}) — origem: ${_dl} → destino: ${_media}`);
-
     try {
-      const result = await spawnDetached("node", ["src/run.js", ...flags], TRANSPORTER_DIR);
-      logger.info("SERVER", `Transporter iniciado (${type}) pid=${result.pid}`);
-      res.json({ ...result, message: `Transporter iniciado — movendo ${type}` });
+      const run = runTransporter(type, { auto: false });
+      if (!run) return res.status(409).json({ error: `Transporter (${type}) já está em andamento` });
+      res.json({ ok: true, id: run.id, message: `Transporter iniciado — movendo ${type}` });
     } catch (err) {
       logger.error("SERVER", `Transporter error: ${err.message}`);
       res.status(500).json({ error: err.message });
@@ -816,6 +905,82 @@ export function toolsRouter(router) {
       return { name: src.name, type: src.type, icon: src.icon, count: items.length, items };
     });
     res.json(result);
+  });
+
+  // ── GET /api/tools/queue — fila unificada (torrent + tidal + transporter) ──
+  router.get("/tools/queue", (_req, res) => {
+    const items = [];
+    try {
+      const torrents = _dmInstance ? _dmInstance.getActiveTorrents() : [];
+      for (const t of torrents) {
+        items.push({
+          source: "torrent", id: t.infoHash, title: t.name, type: t.type,
+          status: t.status, pct: Math.round(t.progress ?? 0),
+          speed: t.downloadSpeed, peers: t.peers, startedAt: t.startTime,
+        });
+      }
+    } catch { /* DM não iniciado — segue sem torrents */ }
+    for (const j of _tidalJobs.values()) {
+      const done = j.albums.filter(a => a.status === "done").length;
+      const total = j.albums.length || 1;
+      items.push({
+        source: "tidal", id: j.jobId,
+        title: j.artistName ? `TideCaller — ${j.artistName}` : "TideCaller — álbuns",
+        status: j.status, pct: Math.round((done / total) * 100),
+        stage: `${done}/${total} álbuns`, startedAt: j.startedAt,
+        albums: j.albums, lastError: j.lastError,
+      });
+    }
+    for (const r of _transporterRuns.values()) {
+      items.push({
+        source: "transporter", id: r.id, title: r.title,
+        status: r.status, startedAt: r.startedAt, auto: r.auto, exitCode: r.exitCode,
+      });
+    }
+    res.json({
+      items,
+      history: _readJsonSafe(_QUEUE_HISTORY_FILE, []).slice(0, 30),
+      autoTransporter: _autoTransporter,
+      updatedAt: Date.now(),
+    });
+  });
+
+  // ── POST /api/tools/settings — toggles da fila (persistido em settings.json) ──
+  router.post("/tools/settings", (req, res) => {
+    const { autoTransporter } = req.body || {};
+    if (typeof autoTransporter === "boolean") {
+      _autoTransporter = autoTransporter;
+      const s = _readJsonSafe(_SETTINGS_FILE, {});
+      s.autoTransporter = _autoTransporter;
+      _writeJsonSafe(_SETTINGS_FILE, s);
+      logger.info("SERVER", `autoTransporter = ${_autoTransporter}`);
+    }
+    res.json({ autoTransporter: _autoTransporter });
+  });
+
+  // ── POST /api/tools/queue/tidal/:id/cancel — mata o processo do job ────────
+  router.post("/tools/queue/tidal/:id/cancel", (req, res) => {
+    const job = _tidalJobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: "Job não encontrado" });
+    if (job.status !== "running") return res.status(409).json({ error: `Job já finalizado (${job.status})` });
+    const proc = _tidalProcs.get(req.params.id);
+    if (proc) proc.kill("SIGTERM");
+    job.status = "cancelled";
+    job.finishedAt = new Date().toISOString();
+    _pushQueueHistory({ source: "tidal", id: job.jobId, title: job.artistName || "TideCaller — álbuns", status: "cancelled", finishedAt: job.finishedAt });
+    logger.warn("SERVER", `TideCaller job cancelado jobId=${req.params.id}`);
+    res.json({ ok: true });
+  });
+
+  // ── POST /api/tools/queue/tidal/:id/retry — re-baixa os álbuns que falharam ─
+  router.post("/tools/queue/tidal/:id/retry", (req, res) => {
+    const job = _tidalJobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: "Job não encontrado" });
+    const failed = job.albums.filter(a => a.status === "error").map(a => a.id);
+    if (!failed.length) return res.status(409).json({ error: "Nenhum álbum com erro para re-tentar" });
+    const meta = Object.fromEntries(job.albums.map(a => [a.id, a.name]));
+    const newJob = startTidalAlbumJob(failed, meta, job.artistName);
+    res.json({ jobId: newJob.jobId, albums: failed.length });
   });
 
   return router;
