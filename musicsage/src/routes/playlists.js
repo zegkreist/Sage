@@ -8,23 +8,23 @@
  * DELETE /api/playlists/:id          → remove playlist (e do Plex se sincronizado)
  */
 
-/** Tenta sincronizar uma playlist com o Plex em background (não bloqueia). */
-function _tryPushToPlex(plexService, playlistBuilder, saved) {
-  if (!plexService || saved.plexId) return;
+/** Tenta sincronizar uma playlist com o servidor de mídia em background (não bloqueia). */
+function _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved) {
+  if (!mediaPlaylists || saved.plexId) return;
   const keys = (saved.tracks || []).map((t) => t.ratingKey).filter(Boolean);
   if (!keys.length) return;
-  plexService
+  mediaPlaylists
     .pushPlaylist(saved.name, keys)
     .then(({ plexId }) => playlistBuilder.update(saved.id, { plexId }))
     .catch((err) => {
-      // Plex pode estar offline — não é crítico
+      // O servidor de mídia pode estar offline — não é crítico
       import("../logger.js").then(({ logger }) =>
-        logger.warn("PLAYLIST", `Plex sync falhou para "${saved.name}": ${err.message}`)
+        logger.warn("PLAYLIST", `Sync com o servidor de mídia falhou para "${saved.name}": ${err.message}`)
       );
     });
 }
 
-export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner, favoritesService } = {}) {
+export function playlistsRouter(router, { playlistBuilder, mediaPlaylists, analysisCache, jobRunner, favoritesService } = {}) {
   // POST /api/playlists/generate
   router.post("/playlists/generate", async (req, res) => {
     const { name, mood, genre, energy, size } = req.body || {};
@@ -38,7 +38,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       });
       const saved = playlistBuilder.save(playlist);
       // Tenta sincronizar com Plex em background (não bloqueia a resposta)
-      _tryPushToPlex(plexService, playlistBuilder, saved);
+      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
       res.status(201).json(saved);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -68,7 +68,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       const job = jobRunner.start("playlist", `prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
         const playlist = await playlistBuilder.generateFromPrompt(prompt.trim(), { onProgress: progress });
         const saved = playlistBuilder.save(playlist);
-        _tryPushToPlex(plexService, playlistBuilder, saved);
+        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
         return saved;
       });
       return res.status(202).json({ jobId: job.id });
@@ -76,7 +76,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
     try {
       const playlist = await playlistBuilder.generateFromPrompt(prompt.trim());
       const saved = playlistBuilder.save(playlist);
-      _tryPushToPlex(plexService, playlistBuilder, saved);
+      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
       res.status(201).json(saved);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -103,7 +103,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       const job = jobRunner.start("playlist", `cache-prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
         const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, { ...opts, onProgress: progress });
         const saved = playlistBuilder.save(playlist);
-        _tryPushToPlex(plexService, playlistBuilder, saved);
+        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
         return saved;
       });
       return res.status(202).json({ jobId: job.id });
@@ -111,7 +111,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
     try {
       const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, opts);
       const saved    = playlistBuilder.save(playlist);
-      _tryPushToPlex(plexService, playlistBuilder, saved);
+      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
       res.status(201).json(saved);
     } catch (err) {
       import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-prompt erro: ${err.message}`));
@@ -155,7 +155,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
           { ...opts, onProgress: progress }
         );
         const saved = playlistBuilder.save(playlist);
-        _tryPushToPlex(plexService, playlistBuilder, saved);
+        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
         return saved;
       });
       return res.status(202).json({ jobId: job.id });
@@ -169,7 +169,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
         opts
       );
       const saved = playlistBuilder.save(playlist);
-      _tryPushToPlex(plexService, playlistBuilder, saved);
+      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
       res.status(201).json(saved);
     } catch (err) {
       import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-track erro: ${err.message}`));
@@ -198,7 +198,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
     const updated = playlistBuilder.update(req.params.id, fields);
 
     // Sincroniza com Plex em background se a playlist já foi enviada ao Plex
-    if (plexService && existing.plexId) {
+    if (mediaPlaylists && existing.plexId) {
       const { plexId } = existing;
       const currentTracks = updated.tracks || [];
       const keys = currentTracks.map((t) => t.ratingKey).filter(Boolean);
@@ -212,7 +212,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       const _recreateInPlex = async () => {
         if (!keys.length) { playlistBuilder.update(updated.id, { plexId: null }); return; }
         try {
-          const { plexId: newId } = await plexService.pushPlaylist(updated.name, keys);
+          const { plexId: newId } = await mediaPlaylists.pushPlaylist(updated.name, keys);
           playlistBuilder.update(updated.id, { plexId: newId });
           _log("info", `Plex: playlist "${updated.name}" recriada (id=${newId})`);
         } catch (e2) {
@@ -223,18 +223,18 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
 
       if (name !== undefined && tracks === undefined) {
         // Apenas renomear — se falhar, tenta recriar com todas as faixas atuais
-        plexService
+        mediaPlaylists
           .renamePlaylist(plexId, updated.name)
           .catch(() => _recreateInPlex());
       } else if (keys.length) {
         // Faixas mudaram: recria a playlist no Plex (delete + push)
-        plexService
+        mediaPlaylists
           .updatePlaylistTracks(plexId, updated.name, keys)
           .then(({ plexId: newPlexId }) => playlistBuilder.update(updated.id, { plexId: newPlexId }))
           .catch(() => _recreateInPlex());
       } else {
         // Playlist ficou vazia: remove do Plex e limpa plexId local
-        plexService
+        mediaPlaylists
           .deletePlaylist(plexId)
           .then(() => playlistBuilder.update(updated.id, { plexId: null }))
           .catch((err) => _log("warn", `Plex delete (vazia) falhou: ${err.message}`));
@@ -246,7 +246,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
 
   // POST /api/playlists/:id/push-to-plex
   router.post("/playlists/:id/push-to-plex", async (req, res) => {
-    if (!plexService) return res.status(503).json({ error: "PlexService não configurado" });
+    if (!mediaPlaylists) return res.status(503).json({ error: "Servidor de mídia não configurado" });
     const pl = playlistBuilder.get(req.params.id);
     if (!pl) return res.status(404).json({ error: "Playlist não encontrada" });
     try {
@@ -254,9 +254,9 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       if (!keys.length) return res.status(400).json({ error: "Playlist não tem faixas com ratingKey" });
       // Se já estava sincronizado, remove a versão antiga antes de recriar
       if (pl.plexId) {
-        await plexService.deletePlaylist(pl.plexId).catch(() => { /* já inexistente */ });
+        await mediaPlaylists.deletePlaylist(pl.plexId).catch(() => { /* já inexistente */ });
       }
-      const { plexId } = await plexService.pushPlaylist(pl.name, keys);
+      const { plexId } = await mediaPlaylists.pushPlaylist(pl.name, keys);
       const updated = playlistBuilder.update(pl.id, { plexId });
       res.json(updated);
     } catch (err) {
@@ -272,8 +272,8 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
     playlistBuilder.delete(req.params.id);
 
     // Remove do Plex em background (não bloqueia resposta)
-    if (plexService && pl.plexId) {
-      plexService.deletePlaylist(pl.plexId).catch((err) =>
+    if (mediaPlaylists && pl.plexId) {
+      mediaPlaylists.deletePlaylist(pl.plexId).catch((err) =>
         import("../logger.js").then(({ logger }) =>
           logger.warn("PLAYLIST", `Plex delete falhou para "${pl.name}": ${err.message}`)
         )

@@ -31,7 +31,7 @@ export class WeeklyDiscoveryService {
     favoritesService,
     recommendationEngine,
     historyService,
-    plexService,
+    mediaPlaylists,
     embeddingService = null,
     clusteringService = null,
     dataDir,
@@ -45,7 +45,7 @@ export class WeeklyDiscoveryService {
     this.favoritesService     = favoritesService;
     this.recommendationEngine = recommendationEngine;
     this.historyService       = historyService;
-    this.plexService          = plexService;
+    this.mediaPlaylists       = mediaPlaylists;
     this.embeddingService     = embeddingService;
     this.clusteringService    = clusteringService;
 
@@ -229,13 +229,13 @@ export class WeeklyDiscoveryService {
     let plexId = null;
     try {
       const keys = (saved.tracks || []).map((t) => t.ratingKey).filter(Boolean);
-      if (this.plexService && keys.length) {
-        ({ plexId } = await this.plexService.pushPlaylist(saved.name, keys));
+      if (this.mediaPlaylists && keys.length) {
+        ({ plexId } = await this.mediaPlaylists.pushPlaylist(saved.name, keys));
         this.playlistBuilder.update(saved.id, { plexId });
       }
     } catch (err) {
-      // Plex fora não invalida a playlist — ela existe localmente e o card mostra o aviso
-      logger.warn("WEEKLY", `Playlist criada mas o push pro Plex falhou: ${err.message}`);
+      // Servidor fora não invalida a playlist — ela existe localmente e o card mostra o aviso
+      logger.warn("WEEKLY", `Playlist criada mas o push pro servidor de mídia falhou: ${err.message}`);
     }
 
     report("Concluído", 100);

@@ -296,23 +296,23 @@ describe("PATCH /api/playlists/:id", () => {
     expect(res.status).toBe(200);
   });
 
-  it("chama plexService.renamePlaylist quando só nome muda e plexId existe", async () => {
-    const plexService = { renamePlaylist: jest.fn().mockResolvedValue(), updatePlaylistTracks: jest.fn() };
+  it("chama renamePlaylist quando só nome muda e plexId existe", async () => {
+    const mediaPlaylists = { renamePlaylist: jest.fn().mockResolvedValue(), updatePlaylistTracks: jest.fn() };
     const existing = { id: "p1", name: "Antigo", plexId: "plex-99", tracks: [] };
     playlistBuilder.get.mockReturnValue(existing);
     playlistBuilder.update.mockReturnValue({ ...existing, name: "Novo" });
 
     const localApp = (await import("../../src/server.js")).createServer({
-      libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService,
+      libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer: { playlists: mediaPlaylists },
     });
     const res = await supertest(localApp).patch("/api/playlists/p1").send({ name: "Novo" });
 
     expect(res.status).toBe(200);
-    expect(plexService.renamePlaylist).toHaveBeenCalledWith("plex-99", "Novo");
+    expect(mediaPlaylists.renamePlaylist).toHaveBeenCalledWith("plex-99", "Novo");
   });
 
-  it("chama plexService.updatePlaylistTracks quando faixas mudam e plexId existe", async () => {
-    const plexService = {
+  it("chama updatePlaylistTracks quando faixas mudam e plexId existe", async () => {
+    const mediaPlaylists = {
       updatePlaylistTracks: jest.fn().mockResolvedValue({ plexId: "plex-100" }),
       renamePlaylist: jest.fn(),
     };
@@ -322,16 +322,16 @@ describe("PATCH /api/playlists/:id", () => {
     playlistBuilder.update.mockReturnValue({ ...existing, tracks: [track] });
 
     const localApp = (await import("../../src/server.js")).createServer({
-      libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService,
+      libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer: { playlists: mediaPlaylists },
     });
     const res = await supertest(localApp).patch("/api/playlists/p1").send({ tracks: [track] });
 
     expect(res.status).toBe(200);
-    expect(plexService.updatePlaylistTracks).toHaveBeenCalledWith("plex-99", "Mix", ["42"]);
+    expect(mediaPlaylists.updatePlaylistTracks).toHaveBeenCalledWith("plex-99", "Mix", ["42"]);
   });
 
-  it("chama plexService.deletePlaylist quando faixas ficam vazias e plexId existe", async () => {
-    const plexService = {
+  it("chama deletePlaylist quando faixas ficam vazias e plexId existe", async () => {
+    const mediaPlaylists = {
       deletePlaylist: jest.fn().mockResolvedValue(),
       updatePlaylistTracks: jest.fn(),
       renamePlaylist: jest.fn(),
@@ -341,12 +341,12 @@ describe("PATCH /api/playlists/:id", () => {
     playlistBuilder.update.mockReturnValue({ ...existing, tracks: [] });
 
     const localApp = (await import("../../src/server.js")).createServer({
-      libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService,
+      libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer: { playlists: mediaPlaylists },
     });
     const res = await supertest(localApp).patch("/api/playlists/p1").send({ tracks: [] });
 
     expect(res.status).toBe(200);
-    expect(plexService.deletePlaylist).toHaveBeenCalledWith("plex-99");
+    expect(mediaPlaylists.deletePlaylist).toHaveBeenCalledWith("plex-99");
   });
 });
 
@@ -627,5 +627,141 @@ describe("Descoberta semanal", () => {
 
     expect(res.status).toBe(409);
     expect(weeklyDiscoveryService.run).not.toHaveBeenCalled();
+  });
+});
+
+// ── Espelho da nota no servidor de mídia ──────────────────────────────────
+
+describe("Sincronização de nota com o servidor de mídia", () => {
+  let dataDir;
+  let favoritesService;
+  let setTrackRating;
+  let mediaServer;
+
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "musicsage-ratingsync-"));
+    favoritesService = new FavoritesService({ dataDir });
+    setTrackRating = jest.fn().mockResolvedValue();
+    mediaServer = { type: "plex", ratings: { supported: true, setTrackRating } };
+    delete process.env.SYNC_RATINGS;
+  });
+
+  afterEach(() => {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    delete process.env.SYNC_RATINGS;
+  });
+
+  const scannerCom = (...tracks) => ({
+    scan: jest.fn().mockResolvedValue({ artists: [], albums: [], tracks }),
+    getArtistNames: jest.fn().mockReturnValue([]),
+  });
+
+  const app = (over = {}) => createServer({ favoritesService, mediaServer, ...over });
+
+  it("nota nova é empurrada para o servidor com o ratingKey do body", async () => {
+    const res = await supertest(app())
+      .put("/api/favorites")
+      .send({ artist: "Portishead", title: "Roads", album: "Dummy", ratingKey: "42", rating: 4 });
+
+    expect(res.status).toBe(200);
+    expect(setTrackRating).toHaveBeenCalledWith("42", 4);
+    expect(res.body.mediaServer).toEqual({ synced: true });
+  });
+
+  it("o ratingKey fica guardado e serve para a próxima alteração", async () => {
+    const a = app();
+    await supertest(a).put("/api/favorites").send({ artist: "A", title: "T", ratingKey: "7", rating: 3 });
+    setTrackRating.mockClear();
+
+    await supertest(a).put("/api/favorites").send({ artist: "A", title: "T", rating: 5 });
+
+    expect(setTrackRating).toHaveBeenCalledWith("7", 5);
+  });
+
+  it("sem ratingKey, resolve a faixa na biblioteca", async () => {
+    const libraryScanner = scannerCom({ ratingKey: "99", title: "Roads", grandparentTitle: "Portishead", parentTitle: "Dummy" });
+
+    await supertest(app({ libraryScanner }))
+      .put("/api/favorites")
+      .send({ artist: "Portishead", title: "Roads", album: "Dummy", rating: 2 });
+
+    expect(setTrackRating).toHaveBeenCalledWith("99", 2);
+  });
+
+  it("faixa que não existe no servidor: grava local e explica por que não sincronizou", async () => {
+    const res = await supertest(app({ libraryScanner: scannerCom() }))
+      .put("/api/favorites")
+      .send({ artist: "Fantasma", title: "Inexistente", rating: 3 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.favorite.rating).toBe(3);
+    expect(res.body.mediaServer).toMatchObject({ synced: false, reason: expect.stringMatching(/não encontrada/) });
+    expect(setTrackRating).not.toHaveBeenCalled();
+  });
+
+  it("só o coração não chama o servidor — não há equivalente lá", async () => {
+    const res = await supertest(app())
+      .put("/api/favorites")
+      .send({ artist: "A", title: "T", ratingKey: "1", starred: true });
+
+    expect(res.body.favorite.starred).toBe(true);
+    expect(setTrackRating).not.toHaveBeenCalled();
+    expect(res.body.mediaServer.reason).toMatch(/não mudou/);
+  });
+
+  it("servidor fora do ar não derruba o favorito local", async () => {
+    setTrackRating.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const res = await supertest(app())
+      .put("/api/favorites")
+      .send({ artist: "A", title: "T", ratingKey: "1", rating: 5 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.favorite.rating).toBe(5);
+    expect(res.body.mediaServer).toMatchObject({ synced: false, reason: "ECONNREFUSED" });
+    expect(favoritesService.get("A", "T", "")).toMatchObject({ rating: 5 });
+  });
+
+  it("provider sem suporte a notas: grava local e diz o motivo", async () => {
+    mediaServer = { type: "outro", ratings: { supported: false } };
+
+    const res = await supertest(app())
+      .put("/api/favorites")
+      .send({ artist: "A", title: "T", ratingKey: "1", rating: 5 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.mediaServer).toMatchObject({ synced: false, reason: expect.stringMatching(/não suporta/) });
+  });
+
+  it("SYNC_RATINGS=false desliga o espelho", async () => {
+    process.env.SYNC_RATINGS = "false";
+
+    const res = await supertest(app())
+      .put("/api/favorites")
+      .send({ artist: "A", title: "T", ratingKey: "1", rating: 5 });
+
+    expect(setTrackRating).not.toHaveBeenCalled();
+    expect(res.body.mediaServer.reason).toMatch(/desligada/);
+  });
+
+  it("apagar o favorito limpa a nota no servidor", async () => {
+    const a = app();
+    await supertest(a).put("/api/favorites").send({ artist: "A", title: "T", ratingKey: "5", rating: 4 });
+    setTrackRating.mockClear();
+
+    const res = await supertest(a).delete("/api/favorites?artist=A&title=T");
+
+    expect(res.status).toBe(200);
+    expect(setTrackRating).toHaveBeenCalledWith("5", null);
+  });
+
+  it("zerar a nota pelo PUT também limpa lá", async () => {
+    const a = app();
+    await supertest(a).put("/api/favorites").send({ artist: "A", title: "T", ratingKey: "5", starred: true, rating: 4 });
+    setTrackRating.mockClear();
+
+    await supertest(a).put("/api/favorites").send({ artist: "A", title: "T", rating: null });
+
+    expect(setTrackRating).toHaveBeenCalledWith("5", null);
   });
 });

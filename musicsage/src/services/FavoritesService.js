@@ -11,7 +11,7 @@ const _DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "../../data");
  *
  * A chave é normalizada de artist+title+album, então o favorito sobrevive a
  * moves de arquivo e a mudanças de ratingKey no Plex.
- * Estrutura: { favorites: { "<key>": { artist, title, album, starred, rating, updatedAt } } }
+ * Estrutura: { favorites: { "<key>": { artist, title, album, ratingKey, starred, rating, updatedAt } } }
  */
 export class FavoritesService {
   constructor({ dataDir } = {}) {
@@ -63,7 +63,7 @@ export class FavoritesService {
 
   /**
    * Cria/atualiza um favorito.
-   * @param {{artist?: string, title?: string, album?: string}} track
+   * @param {{artist?: string, title?: string, album?: string, ratingKey?: string}} track
    * @param {{starred?: boolean, rating?: number|null}} patch
    */
   setFavorite(track, patch = {}) {
@@ -73,6 +73,9 @@ export class FavoritesService {
       artist: track.artist || prev.artist || "",
       title:  track.title  || prev.title  || "",
       album:  track.album  || prev.album  || "",
+      // id no servidor de mídia — guardado para conseguir espelhar a nota lá.
+      // A chave continua sendo nome+álbum, então o favorito sobrevive se ele mudar.
+      ratingKey: track.ratingKey || prev.ratingKey || null,
       starred: typeof patch.starred === "boolean" ? patch.starred : prev.starred ?? false,
       rating:  patch.rating !== undefined
         ? (patch.rating === null ? null : Math.max(0, Math.min(5, Math.round(patch.rating))))

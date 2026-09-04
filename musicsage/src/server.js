@@ -27,7 +27,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {{ libraryScanner, historyService, recommendationEngine, playlistBuilder }} deps
  * @returns {import('express').Application}
  */
-export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, plexService, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService } = {}) {
+export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService } = {}) {
   const app = express();
 
   app.use(express.json({ limit: '10mb' })); // tracks Plex são ~3KB cada; playlists grandes podem exceder 100 KB
@@ -51,19 +51,21 @@ export function createServer({ libraryScanner, historyService, recommendationEng
 
   const jobRunner = new JobRunner();
   const favSvc = favoritesService ?? new FavoritesService();
+  // Porta estreita: quem só publica playlist não precisa do provider inteiro
+  const mediaPlaylists = mediaServer?.playlists ?? null;
 
   healthRouter(router);
   logsRouter(router);
-  libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, plexService, favoritesService: favSvc });
+  libraryRouter(router, { libraryScanner, historyService, metricsService, audioAnalyzer, analysisCache, playlistBuilder, mediaServer, favoritesService: favSvc });
   recommendationsRouter(router, { recommendationEngine, jobRunner });
-  playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner, favoritesService: favSvc });
-  favoritesRouter(router, { favoritesService: favSvc });
+  playlistsRouter(router, { playlistBuilder, mediaPlaylists, analysisCache, jobRunner, favoritesService: favSvc });
+  favoritesRouter(router, { favoritesService: favSvc, mediaServer, libraryScanner });
   weeklyRouter(router, { weeklyDiscoveryService, jobRunner });
   embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });
-  audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, plexService, analysisCache, libraryScanner });
+  audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, mediaPlaylists, analysisCache, libraryScanner });
   lyricsRouter(router, { lyricsService, libraryScanner });
   toolsRouter(router);
-  plexRouter(router, { plexService });
+  plexRouter(router, { mediaServer });
   jobsRouter(router, { jobRunner });
 
   app.use("/api", router);

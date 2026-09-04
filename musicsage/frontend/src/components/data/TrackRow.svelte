@@ -43,7 +43,7 @@
   {/if}
 
   {#if favorite}
-    <FavoriteButton {artist} {title} {album} {withRating} class="shrink-0" />
+    <FavoriteButton {artist} {title} {album} {ratingKey} {withRating} class="shrink-0" />
   {/if}
 
   {#if actions}
