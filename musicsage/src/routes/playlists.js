@@ -24,7 +24,7 @@ function _tryPushToPlex(plexService, playlistBuilder, saved) {
     });
 }
 
-export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner } = {}) {
+export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner, favoritesService } = {}) {
   // POST /api/playlists/generate
   router.post("/playlists/generate", async (req, res) => {
     const { name, mood, genre, energy, size } = req.body || {};
@@ -86,7 +86,7 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
   // POST /api/playlists/from-cache-prompt — gera playlist via LLM usando perfis de áudio do cache
   router.post("/playlists/from-cache-prompt", async (req, res) => {
     if (!analysisCache) return res.status(503).json({ error: "AnalysisCacheService não disponível" });
-    const { prompt, maxPerArtist, discoveryRatio, size } = req.body || {};
+    const { prompt, maxPerArtist, discoveryRatio, size, onlyFavorites } = req.body || {};
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
     }
@@ -95,6 +95,10 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0,
       size:           size           != null ? Math.max(1, parseInt(size, 10)) : null,
     };
+    if (onlyFavorites) {
+      if (!favoritesService) return res.status(503).json({ error: "FavoritesService não disponível" });
+      opts.favoriteKeys = favoritesService.starredKeys();
+    }
     if (req.body?.async && jobRunner) {
       const job = jobRunner.start("playlist", `cache-prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
         const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, { ...opts, onProgress: progress });

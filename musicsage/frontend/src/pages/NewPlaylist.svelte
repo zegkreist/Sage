@@ -18,6 +18,7 @@
   let discoveryRatio = $state(0.2);
   let useRandom     = $state(false);
   let useCache      = $state(true);  // use analysis cache if possible
+  let onlyFavorites = $state(false); // só faixas com coração (exige o cache de análise)
   let generating    = $state(false);
   let promptResult  = $state(null);
   let promptError   = $state('');
@@ -38,6 +39,7 @@
         discoveryRatio,
         size: promptSize,
         random: useRandom,
+        onlyFavorites: useCache && onlyFavorites,
         async: true,
       }, { timeoutMs: 30_000 });
       promptResult = await pollJob(started.jobId, (stage, pct) => { genStage = stage; genPct = pct; });
@@ -186,7 +188,7 @@
           </div>
         </div>
 
-        <div class="flex gap-5">
+        <div class="flex flex-wrap gap-x-5 gap-y-2">
           <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
             <input type="checkbox" bind:checked={useRandom} class="accent-[#7c6af5]" />
             Ordem aleatória
@@ -194,6 +196,15 @@
           <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
             <input type="checkbox" bind:checked={useCache} class="accent-[#7c6af5]" />
             Usar análise de áudio
+          </label>
+          <!-- O filtro roda sobre o cache de análise — sem ele o endpoint nem recebe as chaves -->
+          <label
+            class="flex items-center gap-2 text-sm select-none {useCache ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}"
+            style="color:#8888a8"
+            title={useCache ? 'Gera usando apenas faixas favoritadas' : 'Requer "Usar análise de áudio"'}
+          >
+            <input type="checkbox" bind:checked={onlyFavorites} disabled={!useCache} class="accent-[#7c6af5]" />
+            ♥ Só favoritos
           </label>
         </div>
 

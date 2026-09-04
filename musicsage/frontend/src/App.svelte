@@ -1,6 +1,8 @@
 <script>
+  import { onMount } from 'svelte';
   import { currentPage } from '$lib/stores/router.js';
   import { isMobile } from '$lib/stores/device.js';
+  import { loadFavorites } from '$lib/stores/favorites.js';
   import Sidebar from './components/layout/Sidebar.svelte';
   import MobileHeader from './components/layout/MobileHeader.svelte';
   import BottomNav from './components/layout/BottomNav.svelte';
@@ -16,6 +18,9 @@
   import Downloads       from './pages/Downloads.svelte';
   import Logs            from './pages/Logs.svelte';
   import PlexStatus      from './pages/PlexStatus.svelte';
+
+  // Favoritos são lidos por várias páginas — carrega uma vez no boot
+  onMount(loadFavorites);
 </script>
 
 {#if $isMobile}

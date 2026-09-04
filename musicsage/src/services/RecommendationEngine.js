@@ -18,15 +18,37 @@ const NINETY_DAYS_SEC = 90 * 24 * 3600;
 
 export class RecommendationEngine {
   /**
-   * @param {{ allfather, libraryScanner, historyService, analyzer, lastFmService, analysisCache }} config
+   * @param {{ allfather, libraryScanner, historyService, analyzer, lastFmService, analysisCache, favoritesService }} config
    */
-  constructor({ allfather, libraryScanner, historyService, analyzer, lastFmService, analysisCache } = {}) {
+  constructor({ allfather, libraryScanner, historyService, analyzer, lastFmService, analysisCache, favoritesService } = {}) {
     this.allfather      = allfather;
     this.libraryScanner = libraryScanner;
     this.historyService = historyService;
     this.analyzer       = analyzer;
     this.lastFmService  = lastFmService;
     this.analysisCache  = analysisCache || null;
+    this.favoritesService = favoritesService || null;
+  }
+
+  /**
+   * Curadoria manual (coração + nota 0-5) formatada para o prompt.
+   * É gosto declarado, não inferido do playCount — por isso entra como sinal
+   * mais forte que o histórico. Vazio quando não há favoritos.
+   * @returns {string}
+   */
+  _buildCuratedFavoritesSection(max = 15) {
+    const entries = (this.favoritesService?.list() || [])
+      .filter((f) => f.starred || f.rating != null)
+      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || b.updatedAt - a.updatedAt)
+      .slice(0, max);
+    if (!entries.length) return "";
+    const lines = entries.map((f) => {
+      const heart = f.starred ? " ♥" : "";
+      const rated = f.rating != null ? ` — rated ${f.rating}/5` : "";
+      const track = f.title ? `"${f.title}" — ` : "";
+      return `• ${track}${f.artist || "?"}${heart}${rated}`;
+    });
+    return `\nHAND-CURATED FAVORITES (explicit taste — weigh this above play counts):\n${lines.join("\n")}\n`;
   }
 
   /**
@@ -370,11 +392,13 @@ Return ONLY the JSON array.`;
       enrichedSection = `\nMOST PLAYED TRACKS (use as sonic reference):\n${enrichedContext}\n`;
     }
 
+    const curatedSection = this._buildCuratedFavoritesSection();
+
     return `You are a music expert with encyclopedic knowledge of real, verified artists across all genres and eras.
 
 LISTENER'S FAVORITE ARTISTS (ordered by play count):
 ${favoriteArtistText || "(no listening data yet)"}
-${audioSection}${enrichedSection}
+${curatedSection}${audioSection}${enrichedSection}
 THE LISTENER'S REQUEST: "${userPrompt}"
 
 YOUR TASK: Suggest exactly ${candidateCount} artists that best answer this specific request.
@@ -488,11 +512,13 @@ ${enrichedTrackContext}
       }
     }
 
+    const curatedSection = this._buildCuratedFavoritesSection();
+
     const prompt = `You are a music curator. Select the best matches for this listener from the verified artist list below.
 
 LISTENER'S MOST PLAYED ARTISTS:
 ${favoriteArtistText || "(no data)"}
-${enrichedSection}${audioSection}
+${curatedSection}${enrichedSection}${audioSection}
 ${anchorClause}
 
 VERIFIED CANDIDATES — real artists confirmed by Last.fm (select ONLY from this list):
@@ -586,6 +612,8 @@ ${enrichedTrackContext}
       if (parts.length) audioSection = `\nWEIGHTED AUDIO PROFILE (${audioProfile.totalTracks} tracks, weighted by plays):\n${parts.join("\n")}\n`;
     }
 
+    const curatedSection = this._buildCuratedFavoritesSection();
+
     return `You are a music recommendation expert.
 
 The listener's MOST PLAYED ARTISTS (ordered by play count):
@@ -593,7 +621,7 @@ ${favoriteArtistText || "(no data)"}
 
 The listener's MOST PLAYED TRACKS:
 ${favoriteTrackText || "(no data)"}
-${enrichedSection}${audioSection}
+${curatedSection}${enrichedSection}${audioSection}
 ${anchorClause}
 ${moodClause}
 ${genreClause}
