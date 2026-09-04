@@ -153,3 +153,15 @@ html, body {
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .inset-ring    { box-shadow: inset 0 0 0 1px rgba(124,106,245,0.2); }
 }
+
+/* Ações que aparecem no hover do .group — sempre visíveis em touch
+   (não existe hover) e via teclado (focus-within) */
+.actions-reveal { opacity: 0; transition: opacity 150ms ease; }
+.group:hover .actions-reveal,
+.group:focus-within .actions-reveal { opacity: 1; }
+@media (hover: none) {
+  .actions-reveal { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .actions-reveal { transition: none; }
+}

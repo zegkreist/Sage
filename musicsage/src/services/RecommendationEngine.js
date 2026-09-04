@@ -267,8 +267,10 @@ Return ONLY the JSON array.`;
    * @param {{ limit?: number }} options
    * @returns {Promise<Array<{artist, genre, whyRecommended}>>}
    */
-  async recommendByPrompt(userPrompt, { limit = 10 } = {}) {
+  async recommendByPrompt(userPrompt, { limit = 10, onProgress = null } = {}) {
     logger.info("RECOMMEND", `recommendByPrompt() — prompt="${userPrompt.slice(0, 80)}"`);
+    const report = (stage, pct) => onProgress?.(stage, pct);
+    report('Analisando seu perfil musical…', 10);
     try {
       const [favorites, recentFull] = await Promise.all([
         this.historyService.getFavoriteArtists(20),
@@ -297,11 +299,13 @@ Return ONLY the JSON array.`;
         existingArtists: existingArtists.slice(0, 60),
       });
 
+      report('Pedindo sugestões à IA…', 35);
       const raw   = await this.allfather.askForJSON(prompt, { temperature: 0.65, maxTokens: 2000 });
       const items = Array.isArray(raw) ? raw : (raw?.recommendations ?? raw?.artists ?? []);
       logger.debug("RECOMMEND", `recommendByPrompt: LLM retornou ${items.length} candidatos`);
 
       // Validação Last.fm em lotes de 5 (paralela dentro do lote, sequencial entre lotes)
+      report('Validando artistas no Last.fm…', 70);
       const validated = [];
       for (let i = 0; i < items.length; i += 5) {
         if (validated.length >= limit * 1.5) break;

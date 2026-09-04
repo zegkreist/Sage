@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { api } from '$lib/api.js';
+  import { api, pollJob } from '$lib/api.js';
   import { toast } from '$lib/stores/toast.js';
   import { navigate } from '$lib/stores/router.js';
   import { debounce } from '$lib/utils.js';
@@ -21,26 +21,32 @@
   let generating    = $state(false);
   let promptResult  = $state(null);
   let promptError   = $state('');
+  let genStage      = $state('');
+  let genPct        = $state(0);
 
   async function generateFromPrompt() {
     if (!prompt.trim()) { toast.warn('Digite um prompt'); return; }
     generating  = true;
     promptError = '';
     promptResult = null;
+    genStage = 'Enviando pedido…'; genPct = 0;
     try {
       const endpoint = useCache ? '/playlists/from-cache-prompt' : '/playlists/from-prompt';
-      promptResult = await api('POST', endpoint, {
+      const started = await api('POST', endpoint, {
         prompt: prompt.trim(),
         maxPerArtist,
         discoveryRatio,
         size: promptSize,
         random: useRandom,
-      });
+        async: true,
+      }, { timeoutMs: 30_000 });
+      promptResult = await pollJob(started.jobId, (stage, pct) => { genStage = stage; genPct = pct; });
       toast.success(`Playlist "${promptResult.title ?? promptResult.name}" criada!`);
     } catch (e) {
       promptError = e.message;
     } finally {
       generating = false;
+      genStage = ''; genPct = 0;
     }
   }
 
@@ -55,6 +61,8 @@
   let trackLimit        = $state(30);
   let trackMaxPerArtist = $state(3);
   let trackDiscovery    = $state(0.3);
+  let trackStage        = $state('');
+  let trackPct          = $state(0);
 
   const searchTracks = debounce(async (q) => {
     if (!q.trim() || q.length < 2) { trackResults = []; return; }
@@ -79,19 +87,23 @@
     genTrack  = true;
     trackError = '';
     trackResult = null;
+    trackStage = 'Enviando pedido…'; trackPct = 0;
     try {
-      trackResult = await api('POST', '/playlists/from-cache-track', {
+      const started = await api('POST', '/playlists/from-cache-track', {
         ratingKey:     selectedTrack.ratingKey,
         title:         selectedTrack.title,
         size:          trackLimit,
         maxPerArtist:  trackMaxPerArtist,
         discoveryRatio: trackDiscovery,
-      });
+        async: true,
+      }, { timeoutMs: 30_000 });
+      trackResult = await pollJob(started.jobId, (stage, pct) => { trackStage = stage; trackPct = pct; });
       toast.success(`Playlist "${trackResult.title ?? trackResult.name}" criada!`);
     } catch (e) {
       trackError = e.message;
     } finally {
       genTrack = false;
+      trackStage = ''; trackPct = 0;
     }
   }
 </script>
@@ -147,7 +159,7 @@
           ></textarea>
         </div>
 
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label for="prompt-size" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Nº de músicas</label>
             <input id="prompt-size" type="number" bind:value={promptSize} min="5" max="200"
@@ -194,6 +206,17 @@
         <Button onclick={generateFromPrompt} loading={generating} class="w-full">
           ✦ Gerar Playlist
         </Button>
+
+        {#if generating}
+          <div class="mt-2">
+            <div class="flex justify-between text-2xs mb-1" style="color:#9d8eff">
+              <span>{genStage}</span><span>{genPct}%</span>
+            </div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background:#1a1a28">
+              <div class="h-full rounded-full transition-all duration-500" style="width:{genPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+            </div>
+          </div>
+        {/if}
 
         {#if promptResult}
           <div class="rounded-xl px-4 py-3 border" style="background:rgba(29,185,84,0.08);border-color:rgba(29,185,84,0.2)">
@@ -259,7 +282,7 @@
           </div>
         {/if}
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label for="track-limit" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Tamanho da playlist</label>
             <input id="track-limit" type="number" bind:value={trackLimit} min="5" max="100"
@@ -304,6 +327,17 @@
         <Button onclick={generateFromTrack} loading={genTrack} class="w-full" disabled={!selectedTrack}>
           ♪ Gerar Radio
         </Button>
+
+        {#if genTrack}
+          <div class="mt-2">
+            <div class="flex justify-between text-2xs mb-1" style="color:#9d8eff">
+              <span>{trackStage}</span><span>{trackPct}%</span>
+            </div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background:#1a1a28">
+              <div class="h-full rounded-full transition-all duration-500" style="width:{trackPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+            </div>
+          </div>
+        {/if}
 
         {#if trackResult}
           <div class="rounded-xl px-4 py-3 border" style="background:rgba(29,185,84,0.08);border-color:rgba(29,185,84,0.2)">

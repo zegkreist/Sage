@@ -385,7 +385,7 @@ Return a JSON object with EXACTLY these fields (no extras, no omissions):
 
       if (!result || typeof result !== "object") {
         console.error(`[MusicAnalyzer] Resposta inválida (não-objeto) para "${localPath}":`, result);
-        return FALLBACK;
+        return { ...FALLBACK, _fallback: true };
       }
 
       const merged = { ...FALLBACK, ...result };
@@ -398,7 +398,9 @@ Return a JSON object with EXACTLY these fields (no extras, no omissions):
       return merged;
     } catch (err) {
       console.error(`[MusicAnalyzer] Falha na análise de áudio "${localPath}": ${err.message}`);
-      return FALLBACK;
+      // _fallback: transitivo (ex: Ollama fora do ar) — chamador NÃO deve
+      // persistir, senão o skipExisting pula a faixa para sempre
+      return { ...FALLBACK, _fallback: true };
     }
   }
 }

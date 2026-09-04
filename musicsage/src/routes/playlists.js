@@ -24,7 +24,7 @@ function _tryPushToPlex(plexService, playlistBuilder, saved) {
     });
 }
 
-export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache } = {}) {
+export function playlistsRouter(router, { playlistBuilder, plexService, analysisCache, jobRunner } = {}) {
   // POST /api/playlists/generate
   router.post("/playlists/generate", async (req, res) => {
     const { name, mood, genre, energy, size } = req.body || {};
@@ -58,10 +58,20 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
   });
 
   // POST /api/playlists/from-prompt
+  // Body { async: true } → roda em background e devolve { jobId } (progresso em GET /api/jobs/:id)
   router.post("/playlists/from-prompt", async (req, res) => {
     const { prompt } = req.body || {};
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
+    }
+    if (req.body?.async && jobRunner) {
+      const job = jobRunner.start("playlist", `prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
+        const playlist = await playlistBuilder.generateFromPrompt(prompt.trim(), { onProgress: progress });
+        const saved = playlistBuilder.save(playlist);
+        _tryPushToPlex(plexService, playlistBuilder, saved);
+        return saved;
+      });
+      return res.status(202).json({ jobId: job.id });
     }
     try {
       const playlist = await playlistBuilder.generateFromPrompt(prompt.trim());
@@ -85,6 +95,15 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0,
       size:           size           != null ? Math.max(1, parseInt(size, 10)) : null,
     };
+    if (req.body?.async && jobRunner) {
+      const job = jobRunner.start("playlist", `cache-prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
+        const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, { ...opts, onProgress: progress });
+        const saved = playlistBuilder.save(playlist);
+        _tryPushToPlex(plexService, playlistBuilder, saved);
+        return saved;
+      });
+      return res.status(202).json({ jobId: job.id });
+    }
     try {
       const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, opts);
       const saved    = playlistBuilder.save(playlist);
@@ -125,6 +144,18 @@ export function playlistsRouter(router, { playlistBuilder, plexService, analysis
       maxPerArtist:  maxPerArtist  != null ? Math.max(1, parseInt(maxPerArtist,  10)) : 3,
       discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0.3,
     };
+    if (req.body?.async && jobRunner) {
+      const job = jobRunner.start("playlist", `radio: ${cached.title}`, async ({ progress }) => {
+        const playlist = await playlistBuilder.generateFromCacheWithTrack(
+          cached.analysis, cached.title, ratingKey, analysisCache,
+          { ...opts, onProgress: progress }
+        );
+        const saved = playlistBuilder.save(playlist);
+        _tryPushToPlex(plexService, playlistBuilder, saved);
+        return saved;
+      });
+      return res.status(202).json({ jobId: job.id });
+    }
     try {
       const playlist = await playlistBuilder.generateFromCacheWithTrack(
         cached.analysis,

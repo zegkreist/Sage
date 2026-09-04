@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { api } from '$lib/api.js';
+  import { api, pollJob } from '$lib/api.js';
   import { toast } from '$lib/stores/toast.js';
   import { navigate, navigateToDownload } from '$lib/stores/router.js';
 
@@ -15,6 +15,8 @@
   let promptQuery   = $state('');
   let promptRecs    = $state(null);   // null | []
   let loadingPrompt = $state(false);
+  let promptStage   = $state('');
+  let promptPct     = $state(0);
 
   // ─── Artistas Similares ───────────────────────────────────
   let similar     = $state(null);
@@ -54,18 +56,21 @@
     if (!promptQuery.trim()) return;
     loadingPrompt = true;
     promptRecs    = null;
+    promptStage = 'Enviando pedido…'; promptPct = 0;
     try {
-      const list = await api('POST', '/recommendations/by-prompt', {
+      const started = await api('POST', '/recommendations/by-prompt', {
         prompt: promptQuery.trim(),
         limit:  10,
-      });
+        async: true,
+      }, { timeoutMs: 30_000 });
+      const list = await pollJob(started.jobId, (stage, pct) => { promptStage = stage; promptPct = pct; });
       promptRecs = (Array.isArray(list) ? list : []).map(r => ({
         name:           r.name   ?? r.artist ?? '?',
         genre:          r.genre  ?? '',
         whyRecommended: r.whyRecommended ?? r.why ?? '',
       }));
     } catch (e) { toast.error(e.message); }
-    finally { loadingPrompt = false; }
+    finally { loadingPrompt = false; promptStage = ''; promptPct = 0; }
   }
 
   // ── Similares ───────────────────────────────────────────────
@@ -90,10 +95,13 @@
 
   async function createPlaylistFromArtist(artist) {
     try {
-      const pl = await api('POST', '/playlists/from-prompt', {
+      toast(`Gerando playlist de ${artist}…`);
+      const started = await api('POST', '/playlists/from-prompt', {
         prompt: `Músicas do artista ${artist} que estão na minha biblioteca`,
         maxPerArtist: 5,
-      });
+        async: true,
+      }, { timeoutMs: 30_000 });
+      const pl = await pollJob(started.jobId);
       toast.success(`Playlist "${pl.title ?? pl.name}" criada!`);
       navigate('playlists');
     } catch (e) { toast.error(e.message); }
@@ -116,7 +124,7 @@
       showSugg    = suggestions.length > 0;
       activeSugg  = -1;
       _updateDropPos();
-    } catch { suggestions = []; }
+    } catch { suggestions = []; showSugg = false; }
   }
 
   function onArtistInput(e) {
@@ -199,9 +207,15 @@
       </p>
 
       {#if loadingPrompt}
-        <div class="flex items-center gap-2 mt-5 py-4">
-          <Spinner size="sm" />
-          <span class="text-2xs" style="color:#5a5a78">Gerando e validando artistas…</span>
+        <div class="mt-5 py-4">
+          <div class="flex items-center gap-2">
+            <Spinner size="sm" />
+            <span class="text-2xs" style="color:#9d8eff">{promptStage || 'Gerando…'}</span>
+            <span class="text-2xs ml-auto" style="color:#5a5a78">{promptPct}%</span>
+          </div>
+          <div class="h-1.5 rounded-full overflow-hidden mt-2" style="background:#1a1a28">
+            <div class="h-full rounded-full transition-all duration-500" style="width:{promptPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+          </div>
         </div>
       {:else if promptRecs !== null}
         {#if promptRecs.length === 0}
@@ -228,7 +242,7 @@
                     {/if}
                   </div>
                 </div>
-                <div class="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
@@ -290,7 +304,7 @@
                   <span class="text-2xs px-2 py-0.5 rounded font-medium shrink-0"
                         style="background:rgba(88,88,120,0.2);color:#5a5a78">Fora</span>
                 {/if}
-                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <div class="actions-reveal flex gap-1 shrink-0">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs transition-colors"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
@@ -402,7 +416,7 @@
                 {#if a.inLibrary}
                   <div class="text-2xs mt-1 font-medium" style="color:#1db954">Na biblioteca</div>
                 {/if}
-                <div class="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
                           style="background:rgba(56,189,248,0.1);color:#38bdf8"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', a.name)}>∿</button>

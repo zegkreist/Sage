@@ -99,23 +99,38 @@ const TRANSPORTER_DIR  = process.env.TRANSPORTER_DIR  || join(__dirname, "../../
 
 // Carrega config do Stormbringer com paths resolvidos em absoluto
 function loadStormbringerConfig() {
-  const raw = JSON.parse(readFileSync(join(STORMBRINGER_DIR, "config.json"), "utf8"));
-  // Resolver paths relativos para absolutos
-  const dl = raw.downloads;
-  raw.downloads = {
-    baseDir:   resolve(STORMBRINGER_DIR, dl.baseDir),
-    movies:    resolve(STORMBRINGER_DIR, dl.movies),
-    series:    resolve(STORMBRINGER_DIR, dl.series),
-    music:     resolve(STORMBRINGER_DIR, dl.music),
-    stateFile: dl.stateFile ? resolve(STORMBRINGER_DIR, dl.stateFile) : join(STORMBRINGER_DIR, ".download-state.json"),
-  };
-  if (raw.music?.trackerFile) {
-    raw.music.trackerFile = resolve(STORMBRINGER_DIR, raw.music.trackerFile);
+  try {
+    const raw = JSON.parse(readFileSync(join(STORMBRINGER_DIR, "config.json"), "utf8"));
+    // Resolver paths relativos para absolutos
+    const dl = raw.downloads;
+    raw.downloads = {
+      baseDir:   resolve(STORMBRINGER_DIR, dl.baseDir),
+      movies:    resolve(STORMBRINGER_DIR, dl.movies),
+      series:    resolve(STORMBRINGER_DIR, dl.series),
+      music:     resolve(STORMBRINGER_DIR, dl.music),
+      stateFile: dl.stateFile ? resolve(STORMBRINGER_DIR, dl.stateFile) : join(STORMBRINGER_DIR, ".download-state.json"),
+    };
+    if (raw.music?.trackerFile) {
+      raw.music.trackerFile = resolve(STORMBRINGER_DIR, raw.music.trackerFile);
+    }
+    if (raw.series?.trackerFile) {
+      raw.series.trackerFile = resolve(STORMBRINGER_DIR, raw.series.trackerFile);
+    }
+    return raw;
+  } catch (err) {
+    // Config ausente/corrompido não pode derrubar o boot do servidor —
+    // features que dependem dele falham na hora de uso, não no startup
+    logger.warn("SERVER", `Stormbringer config.json indisponível (${err.message}) — usando defaults`);
+    return {
+      downloads: {
+        baseDir:   join(STORMBRINGER_DIR, "downloads"),
+        movies:    join(STORMBRINGER_DIR, "downloads", "filmes"),
+        series:    join(STORMBRINGER_DIR, "downloads", "series"),
+        music:     join(STORMBRINGER_DIR, "downloads", "musicas"),
+        stateFile: join(STORMBRINGER_DIR, ".download-state.json"),
+      },
+    };
   }
-  if (raw.series?.trackerFile) {
-    raw.series.trackerFile = resolve(STORMBRINGER_DIR, raw.series.trackerFile);
-  }
-  return raw;
 }
 
 // Lazy-load do singleton TorrentSearch do Stormbringer
