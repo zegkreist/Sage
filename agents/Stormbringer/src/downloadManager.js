@@ -95,6 +95,19 @@ class DownloadManager extends EventEmitter {
 
   setLogger(fn) { this._log = fn; }
 
+  /**
+   * Caminho absoluto de um arquivo do torrent no disco.
+   *
+   * torrent.files[].path é RELATIVO a torrent.path (o diretório de download) —
+   * usar o valor cru em fs.existsSync/renameSync faz o existsSync dar false e
+   * a organização é PULADA em silêncio: o download termina, a pasta
+   * Artista/Álbum é criada vazia e as faixas ficam para trás na pasta do
+   * torrent.
+   */
+  absoluteFilePath(torrent, file) {
+    return path.resolve(torrent.path, file.path);
+  }
+
   _augmentMagnet(magnet) {
     if (!magnet || !magnet.startsWith("magnet:")) return magnet;
     // Não usar new URL() — searchParams.append() codifica ":" em xt=urn:btih:HASH
@@ -109,17 +122,75 @@ class DownloadManager extends EventEmitter {
     return result;
   }
 
+  // Formas aceitas de infoHash BitTorrent v1: 40 hex ou 32 base32.
+  // `xt.1=` NÃO entra de propósito — o magnet-uri não reconhece essa variante e
+  // devolve infoHash undefined, que é justamente o caso que quebra tudo abaixo.
+  static BTIH_RE = /[?&]xt=urn:btih:([a-f0-9]{40}|[a-z2-7]{32})(?:&|$)/i;
+  static INFOHASH_RE = /^([a-f0-9]{40}|[a-z2-7]{32})$/i;
+
+  /**
+   * Valida o identificador ANTES de entregá-lo ao WebTorrent.
+   *
+   * Sem isto, um magnet sem `xt=urn:btih:` válido chega ao Torrent._onTorrentId()
+   * do webtorrent, que faz arr2hex(parsedTorrent.infoHash) com infoHash undefined.
+   * O TypeError nasce dentro de um método async que ninguém aguarda: vira
+   * unhandled rejection, a promise de addTorrent() NUNCA settla, o .catch() do
+   * chamador nunca dispara e o download só "morre" no hardTimer de 5 min — o
+   * usuário vê "Download iniciado" e nada acontece.
+   *
+   * (parse-torrent >= 11.0.17 lança "Invalid torrent identifier" antes disso, mas
+   * a imagem instala sem lockfile, então a versão não é garantida — a validação
+   * precisa ser nossa.)
+   *
+   * Lança de forma SÍNCRONA, fora da Promise, para que o try/catch do chamador
+   * pegue o erro antes de responder "ok" ao usuário.
+   */
+  static assertValidTorrentId(torrentId) {
+    if (ArrayBuffer.isView(torrentId)) {
+      // Todo .torrent bencodado começa com um dicionário — o byte 'd' (0x64).
+      if (torrentId.length === 0 || torrentId[0] !== 0x64) {
+        const head = Buffer.from(
+          torrentId.buffer, torrentId.byteOffset, Math.min(60, torrentId.length)
+        ).toString("utf8");
+        throw new Error(
+          `Conteúdo baixado não é um .torrent (esperado bencode, veio ${JSON.stringify(head)}) ` +
+          `— provável página de erro/HTML do indexer`
+        );
+      }
+      return torrentId;
+    }
+    if (typeof torrentId !== "string" || !torrentId.trim()) {
+      throw new Error(
+        `Torrent id inválido: esperado magnet, infoHash, URL ou Buffer de .torrent ` +
+        `— recebido ${torrentId === null ? "null" : typeof torrentId}`
+      );
+    }
+    const id = torrentId.trim();
+    if (id.startsWith("magnet:")) {
+      if (!DownloadManager.BTIH_RE.test(id)) {
+        throw new Error(`Magnet sem xt=urn:btih: válido (40 hex ou 32 base32) — "${id.slice(0, 120)}"`);
+      }
+      return id;
+    }
+    if (DownloadManager.INFOHASH_RE.test(id)) return id;
+    if (id.startsWith("http://") || id.startsWith("https://")) return id;
+    throw new Error(`Torrent id não reconhecido — "${id.slice(0, 120)}"`);
+  }
+
   /**
    * Adiciona um torrent para download
    */
   addTorrent(torrentId, type, metadata = {}) {
+    // Síncrono de propósito: ver assertValidTorrentId().
+    const validId = DownloadManager.assertValidTorrentId(torrentId);
+
     return new Promise((resolve, reject) => {
       const downloadPath = this.getDownloadPath(type);
 
       // Se for magnet, augmenta com trackers públicos
-      const resolvedId = (typeof torrentId === "string" && torrentId.startsWith("magnet:"))
-        ? this._augmentMagnet(torrentId)
-        : torrentId;
+      const resolvedId = (typeof validId === "string" && validId.startsWith("magnet:"))
+        ? this._augmentMagnet(validId)
+        : validId;
 
       const torrent = this.client.add(resolvedId, {
         path: downloadPath,
@@ -187,23 +258,34 @@ class DownloadManager extends EventEmitter {
         }
       });
 
+      // Listener async: qualquer throw aqui vira unhandled rejection e, sem um
+      // handler de processo, DERRUBA o servidor inteiro. O torrent já está no
+      // disco a essa altura — falha ao organizar não pode custar o processo.
       torrent.on("done", async () => {
         torrentInfo.status = "completed";
         torrentInfo.progress = 100;
         this._log("info", `Download concluído: "${torrent.name}" → ${downloadPath}`);
 
-        // Processar metadados e organizar arquivos
-        if (this.config.metadata?.enabled) {
-          await this.processDownloadedFiles(torrent, type, metadata);
+        try {
+          // Processar metadados e organizar arquivos
+          if (this.config.metadata?.enabled) {
+            await this.processDownloadedFiles(torrent, type, metadata);
+          }
+
+          // Organizar arquivos se for música (sem metadados TMDB)
+          if (type === "music" && metadata.artist) {
+            this.organizeMusicFiles(torrent, metadata);
+          }
+        } catch (err) {
+          this._log("error", `Falha ao organizar "${torrent.name}": ${err.message} — arquivos ficaram em ${downloadPath}`);
         }
 
-        // Organizar arquivos se for música (sem metadados TMDB)
-        if (type === "music" && metadata.artist) {
-          this.organizeMusicFiles(torrent, metadata);
+        try {
+          this.saveState();
+          this.emit("completed", torrentInfo);
+        } catch (err) {
+          this._log("error", `Falha no pós-download de "${torrent.name}": ${err.message}`);
         }
-
-        this.saveState();
-        this.emit("completed", torrentInfo);
       });
 
       torrent.on("error", (err) => {
@@ -255,7 +337,7 @@ class DownloadManager extends EventEmitter {
 
     // Mover arquivos
     torrent.files.forEach((file) => {
-      const oldPath = file.path;
+      const oldPath = this.absoluteFilePath(torrent, file);
       const fileName = path.basename(oldPath);
       const newPath = path.join(albumPath, fileName);
 
@@ -417,10 +499,11 @@ class DownloadManager extends EventEmitter {
         const ext = path.extname(videoFile.name);
         const newName = this.metadataEnricher.getMovieFilename(movieMetadata) + ext;
         const newPath = path.join(movieFolder, newName);
+        const srcPath = this.absoluteFilePath(torrent, videoFile);
 
         try {
-          if (fs.existsSync(videoFile.path)) {
-            fs.renameSync(videoFile.path, newPath);
+          if (fs.existsSync(srcPath)) {
+            fs.renameSync(srcPath, newPath);
             console.log(`📝 Renomeado: ${newName}`);
           }
         } catch (err) {
@@ -430,10 +513,11 @@ class DownloadManager extends EventEmitter {
 
       // Mover arquivos extras (legendas, etc)
       torrent.files.forEach((file) => {
-        if (file !== videoFile && fs.existsSync(file.path)) {
+        const srcPath = this.absoluteFilePath(torrent, file);
+        if (file !== videoFile && fs.existsSync(srcPath)) {
           const newPath = path.join(movieFolder, path.basename(file.name));
           try {
-            fs.renameSync(file.path, newPath);
+            fs.renameSync(srcPath, newPath);
           } catch (err) {
             // Ignorar erros em arquivos extras
           }
@@ -490,10 +574,11 @@ class DownloadManager extends EventEmitter {
         const episodeName = episodeMetadata?.name || null;
         const newName = this.metadataEnricher.getEpisodeFilename(seriesMetadata, season, episode, episodeName) + ext;
         const newPath = path.join(seasonFolder, newName);
+        const srcPath = this.absoluteFilePath(torrent, videoFile);
 
         try {
-          if (fs.existsSync(videoFile.path)) {
-            fs.renameSync(videoFile.path, newPath);
+          if (fs.existsSync(srcPath)) {
+            fs.renameSync(srcPath, newPath);
             console.log(`📝 Renomeado: ${newName}`);
           }
         } catch (err) {
@@ -503,10 +588,11 @@ class DownloadManager extends EventEmitter {
 
       // Mover arquivos extras (legendas, etc)
       torrent.files.forEach((file) => {
-        if (file !== videoFile && fs.existsSync(file.path)) {
+        const srcPath = this.absoluteFilePath(torrent, file);
+        if (file !== videoFile && fs.existsSync(srcPath)) {
           const newPath = path.join(seasonFolder, path.basename(file.name));
           try {
-            fs.renameSync(file.path, newPath);
+            fs.renameSync(srcPath, newPath);
           } catch (err) {
             // Ignorar erros em arquivos extras
           }

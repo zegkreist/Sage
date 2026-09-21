@@ -54,7 +54,19 @@ mkdir -p \
   "${DATA_DIR:-/data}/logs" \
   "${DATA_DIR:-/data}/embeddings" \
   "${DATA_DIR:-/data}/playlists" \
+  "${DATA_DIR:-/data}/hermes" \
   2>/dev/null || true
+
+# Canal de controle do Hermes: o container roda como root e /data é bind mount,
+# então sem isto tudo nasce root:root 0644 e o Hermes (outro usuário no host)
+# não consegue escrever o requests.md. A pasta precisa ser gravável porque
+# escrever por tmp+rename exige permissão no diretório, não só no arquivo.
+# O Node reaplica isso no boot (HermesInboxService.ensureScaffold); aqui garante
+# que a pasta já esteja utilizável mesmo se o Node falhar ao subir.
+chmod 0777 "${DATA_DIR:-/data}/hermes" 2>/dev/null || true
+[ -f "${DATA_DIR:-/data}/hermes/requests.md" ] \
+  && chmod 0666 "${DATA_DIR:-/data}/hermes/requests.md" 2>/dev/null || true
+
 _log "INFO " "Diretórios de runtime verificados"
 node index.js &
 NODE_PID=$!

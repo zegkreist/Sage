@@ -109,6 +109,72 @@ docker build -f musicsage/Dockerfile -t musicsage:latest .
 
 > **Dica:** Monte `/downloads` num disco com espaço generoso. Em NAS Synology/QNAP, uma pasta dedicada em `/volume1/downloads` é suficiente.
 
+### Subdiretórios de `/data`
+
+| Caminho | Conteúdo |
+|---|---|
+| `/data/hermes` | Canal de controle em markdown (veja abaixo) |
+| `/data/logs` | Logs diários (`musicsage-YYYY-MM-DD.log`) |
+| `/data/playlists` | Playlists geradas |
+| `/data/embeddings` | Vetores de embedding |
+| `/data/stormbringer` | Estado dos torrents e trackers |
+
+---
+
+## Canal de controle para agentes (`/data/hermes`)
+
+`/data` é um bind mount, então qualquer agente com acesso à pasta de deploy
+(no host: `./musicsage/data/hermes/`) controla o Sage **por arquivos markdown**,
+sem precisar chamar a API.
+
+| Arquivo | Quem escreve | Permissão | Para quê |
+|---|---|---|---|
+| `README.md` | Sage | 0644 | Contrato completo, regerado a cada boot |
+| `requests.md` | **o agente** | **0666** | Fila de pedidos de download |
+| `done.md` | Sage | 0644 | Histórico append-only do que concluiu |
+| `status.md` | Sage | 0644 | Biblioteca, fila e erros — reescrito a cada 2 min |
+
+> **Permissões:** o container roda como root, então tudo que ele cria sai
+> `root:root 0644` no bind mount e um agente rodando como outro usuário não
+> conseguiria escrever. O Sage força `0777` na pasta e `0666` no `requests.md`
+> a cada boot — e **preserva** essa permissão ao reescrever o arquivo, já que o
+> `rename` da escrita atômica troca o inode e devolveria `0644` na primeira
+> conclusão. A pasta precisa ser gravável, e não só o arquivo, porque gravar por
+> tmp+rename exige permissão no diretório.
+
+O agente adiciona linhas em `requests.md`:
+
+```markdown
+- [ ] Radiohead — Creep
+- [ ] Miles Davis — So What #track
+- [ ] Pink Floyd — Animals #torrent
+- [ ] https://tidal.com/browse/track/12345678
+```
+
+Os pendentes aparecem no card **"Pedidos do Hermes"** na aba Downloads. Um
+humano dispara cada um — a busca já vem preenchida — porque escolher entre
+versões de um torrent (FLAC vs 320, remaster, edição) precisa de julgamento.
+Quando o download conclui, o Sage **remove a linha** de `requests.md` e registra
+em `done.md`.
+
+**Origem padrão: Tidal** — cobre faixa e álbum, é lossless e não tem
+ambiguidade de versão. O torrent é o fallback e precisa ser pedido com
+`#torrent`. Tags aceitas no fim da linha (`#tag` ou `(tag)`): `#track`,
+`#album`, `#tidal`, `#torrent`.
+
+Cada pedido expõe os dois botões (🌊 Tidal / ⚡ Torrent) e mostra **por que**
+caiu na rota sugerida — a mesma explicação vai para o log, em `[HERMES]`. O
+contrato completo, com os limites conhecidos, está no `README.md` gerado dentro
+da pasta.
+
+### Rotas
+
+| Rota | Efeito |
+|---|---|
+| `GET /api/hermes/inbox` | Pedidos pendentes |
+| `POST /api/hermes/inbox/:id/resolve` | Conclui (`done`) ou dispensa (`skipped`) um pedido |
+| `POST /api/hermes/status` | Reescreve `status.md` agora |
+
 ---
 
 ## docker-compose.yml de exemplo

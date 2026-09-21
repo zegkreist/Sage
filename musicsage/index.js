@@ -22,6 +22,8 @@ import { LastFmService } from "./src/services/LastFmService.js";
 import { LyricsService } from "./src/services/LyricsService.js";
 import { FavoritesService } from "./src/services/FavoritesService.js";
 import { WeeklyDiscoveryService } from "./src/services/WeeklyDiscoveryService.js";
+import { HermesInboxService } from "./src/services/HermesInboxService.js";
+import { refreshHermesStatus } from "./src/routes/hermes.js";
 import { createMediaServer } from "./src/media/index.js";
 import { createServer } from "./src/server.js";
 
@@ -32,6 +34,28 @@ const MEDIA_SERVER_URL   = process.env.MEDIA_SERVER_URL   || process.env.PLEX_UR
 const MEDIA_SERVER_TOKEN = process.env.MEDIA_SERVER_TOKEN || process.env.PLEX_TOKEN || "";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const MODEL = process.env.OLLAMA_DEFAULT_MODEL || "gemma4-256k:latest";
+
+// ── Rede de segurança do processo ─────────────────────────────────────────
+// Sem estes handlers qualquer exceção solta derruba o servidor inteiro com
+// exit code 1 e o stack trace vai só para o stderr — nunca chega no arquivo
+// de log que o usuário lê, então a falha aparece como "failed to fetch" na UI
+// sem nenhuma pista. O caso real: a stack do WebTorrent (DHT/LSD/trackers em
+// sockets UDP) emite erros assíncronos fora de qualquer try/catch de rota.
+//
+// Um download de torrent com problema é uma falha LOCAL: não pode levar junto
+// a biblioteca, as playlists e a descoberta semanal. Por isso o processo segue
+// de pé e a falha é registrada com stack completo.
+process.on("uncaughtException", (err, origin) => {
+  logger.error("SERVER", `Exceção não capturada (${origin}) — servidor segue de pé`, err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error(
+    "SERVER",
+    "Promise rejeitada sem catch — servidor segue de pé",
+    reason instanceof Error ? reason : new Error(String(reason)),
+  );
+});
 
 // ── Instancia serviços ────────────────────────────────────────────────────
 
@@ -99,6 +123,11 @@ const weeklyDiscoveryService = new WeeklyDiscoveryService({
   clusteringService,
 }).load();
 
+// Canal de controle em markdown para o Hermes (DATA_DIR/hermes/) — ver o
+// README.md gerado lá dentro. ensureScaffold() nunca lança: um canal de
+// controle indisponível não pode impedir o servidor de subir.
+const hermesInbox = new HermesInboxService().ensureScaffold();
+
 // Carrega cache de análises salvas anteriormente — await garante que o cache
 // está disponível antes do primeiro request chegar ao servidor
 try {
@@ -123,10 +152,19 @@ libraryScanner.scan().then((result) => {
 
 // ── Sobe o servidor ───────────────────────────────────────────────────────
 
-const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService });
+const app = createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService, hermesInbox });
 
 // Agendador da descoberta semanal — só dispara se estiver habilitado nas settings
 weeklyDiscoveryService.start();
+
+// status.md para o Hermes: no boot e a cada 2 min. unref() para não segurar
+// o processo no shutdown.
+const HERMES_STATUS_INTERVAL_MS = 2 * 60 * 1000;
+const refreshStatus = () =>
+  refreshHermesStatus({ hermesInbox, libraryScanner })
+    .catch((err) => logger.warn("HERMES", `Falha ao escrever status.md: ${err.message}`));
+refreshStatus();
+setInterval(refreshStatus, HERMES_STATUS_INTERVAL_MS).unref();
 
 const server = app.listen(PORT);
 

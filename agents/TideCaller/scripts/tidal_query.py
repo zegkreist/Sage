@@ -4,9 +4,12 @@ tidal_query.py — Bridge JSON para o MusicSage API.
 
 Comandos:
   python tidal_query.py search-artists QUERY        → JSON array de artistas
+  python tidal_query.py search-tracks  QUERY        → JSON array de faixas
   python tidal_query.py list-albums    ARTIST_ID    → JSON array de álbuns
   python tidal_query.py album-info     ALBUM_ID     → JSON com metadados do álbum
+  python tidal_query.py track-info     TRACK_ID     → JSON com metadados da faixa
   python tidal_query.py download-albums ALBUM_ID... → baixa e imprime status JSON
+  python tidal_query.py download-tracks TRACK_ID... → baixa faixas avulsas, status JSON
 
 Saída sempre é JSON válido em stdout; erros como {"error": "..."} com exit 1.
 """
@@ -159,6 +162,33 @@ def _patch_config_databases():
         original = text
         text = re.sub(r'(?m)^(downloads_enabled\s*=\s*)true', r'\g<1>false', text)
         text = re.sub(r'(?m)^(failed_downloads_enabled\s*=\s*)true', r'\g<1>false', text)
+        if text != original:
+            CONFIG_TOML.write_text(text, encoding="utf-8")
+    except Exception:
+        pass  # Não bloquear o download por falha de patch
+
+
+def _patch_config_singles_folder():
+    """
+    Força [filepaths] add_singles_to_folder = true.
+
+    Sem isso o streamrip grava uma faixa avulsa solta na raiz da pasta de
+    downloads. O Transporter (musicOrganizer.processSource) só entra em
+    DIRETÓRIOS da raiz — arquivo solto é ignorado para sempre e a faixa nunca
+    chega na biblioteca. Com o flag ligado a faixa cai em
+    "Artista - Álbum (Ano) [FLAC] [...]/", a mesma estrutura de um álbum.
+    """
+    if not CONFIG_TOML.exists():
+        return
+    try:
+        text = CONFIG_TOML.read_text(encoding="utf-8")
+        original = text
+        if re.search(r'(?m)^add_singles_to_folder\s*=', text):
+            text = re.sub(r'(?m)^(add_singles_to_folder\s*=\s*)false', r'\g<1>true', text)
+        elif re.search(r'(?m)^\[filepaths\]', text):
+            text = re.sub(r'(?m)^(\[filepaths\]\n)', r'\1add_singles_to_folder = true\n', text, count=1)
+        else:
+            text += "\n[filepaths]\nadd_singles_to_folder = true\n"
         if text != original:
             CONFIG_TOML.write_text(text, encoding="utf-8")
     except Exception:
@@ -319,6 +349,42 @@ def cmd_search_artists(query: str):
     _out(out)
 
 
+def cmd_search_tracks(query: str):
+    """
+    Busca faixas por texto ("Artista Música") — usado quando um pedido pede uma
+    música só e não veio com link do Tidal.
+    """
+    import tidalapi
+    session = get_session()
+    try:
+        results = session.search(query, [tidalapi.Track])
+        tracks = results.get("tracks", []) if isinstance(results, dict) else getattr(results, "tracks", [])
+    except Exception as e:
+        _err(f"Erro na busca de faixas: {e}")
+
+    out = []
+    for t in (tracks or [])[:15]:
+        try:
+            artist = t.artist.name if t.artist else None
+        except Exception:
+            artist = None
+        album_obj = getattr(t, "album", None)
+        try:
+            album = album_obj.name if album_obj else None
+        except Exception:
+            album = None
+        out.append({
+            "id":       t.id,
+            "name":     t.name,
+            "artist":   artist,
+            "album":    album,
+            "year":     _album_year(album_obj) if album_obj else None,
+            "duration": getattr(t, "duration", None),
+            "url":      f"https://tidal.com/browse/track/{t.id}",
+        })
+    _out(out)
+
+
 def cmd_list_albums(artist_id: str):
     import tidalapi
     session = get_session()
@@ -365,6 +431,40 @@ def cmd_album_info(album_id: str):
         "artist": artist,
         "year":   _album_year(album),
         "url":    f"https://tidal.com/browse/album/{album_id}",
+    })
+
+
+def cmd_track_info(track_id: str):
+    """Metadados de uma faixa avulsa — usado no download por link do Tidal."""
+    import tidalapi
+    session = get_session()
+    try:
+        track = tidalapi.Track(session, track_id)
+        name = track.name
+    except Exception as e:
+        _err(f"Erro ao buscar faixa: {e}")
+
+    if not name:
+        _err(f"Faixa {track_id} não encontrada")
+
+    try:
+        artist = track.artist.name if track.artist else None
+    except Exception:
+        artist = None
+
+    album_obj = getattr(track, "album", None)
+    try:
+        album = album_obj.name if album_obj else None
+    except Exception:
+        album = None
+
+    _out({
+        "id":     track_id,
+        "name":   name,
+        "artist": artist,
+        "album":  album,
+        "year":   _album_year(album_obj) if album_obj else None,
+        "url":    f"https://tidal.com/browse/track/{track_id}",
     })
 
 
@@ -475,6 +575,7 @@ def cmd_download_albums(album_ids: list[str]):
     _patch_config_updates()   # update check do GitHub não pode abortar o download
     _patch_config_quality()   # garantir quality=1
     _patch_config_databases()
+    _patch_config_singles_folder()  # álbum de 1 faixa também precisa de pasta
     # Refrescar o access_token antes de rodar o rip (o token real do Tidal expira
     # bem mais rápido que isso — não confiar em um expiry fixo)
     session = _refresh_and_save_tokens()
@@ -564,6 +665,72 @@ def cmd_download_albums(album_ids: list[str]):
     _out({"done": True, "results": results})
 
 
+def cmd_download_tracks(track_ids: list[str]):
+    """
+    Baixa faixas avulsas por ID, uma linha JSON de status por faixa.
+
+    Mesmo caminho do rip usado pelos álbuns — a diferença é o
+    add_singles_to_folder, que garante a mesma estrutura de pastas
+    ("Artista - Álbum (Ano) [...]/faixa") que o Transporter sabe organizar.
+    """
+    _ensure_config_exists()
+    _patch_config_updates()   # update check do GitHub não pode abortar o download
+    _patch_config_quality()
+    _patch_config_databases()
+    _patch_config_singles_folder()  # sem isso a faixa fica solta e o Transporter ignora
+    session = _refresh_and_save_tokens()
+    if session is None:
+        for tid in track_ids:
+            print(json.dumps({"trackId": tid, "ok": False,
+                              "error": "Token Tidal inválido ou expirado. Refaça o login OAuth."}),
+                  flush=True)
+        _out({"done": True, "results": []})
+        return
+
+    _venv_rip = AGENT_DIR / ".venv_tidal" / "bin" / "rip"
+    rip_bin = str(_venv_rip) if _venv_rip.exists() else "rip"
+    major_ver = _rip_major_version(rip_bin)
+    download_dir = os.environ.get("TIDECALLER_DOWNLOADS") or str(AGENT_DIR / "downloads")
+    _patch_config_download_folder(download_dir)
+    env = {
+        **os.environ,
+        "XDG_CONFIG_HOME": str(AGENT_DIR / "config" / ".config"),
+    }
+    QUALITY_FALLBACKS = [3, 2, 1, 0] if major_ver == 1 else [1]
+    # Uma faixa só: _download_once já confirma que apareceu áudio novo, então
+    # basta uma re-tentativa para cobrir token expirado / 429 pontual.
+    MAX_ATTEMPTS = 2
+
+    results = []
+    for tid in track_ids:
+        url = f"https://tidal.com/browse/track/{tid}"
+        try:
+            ok = False
+            used_quality = None
+            last_combined = ""
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                if attempt > 1:
+                    time.sleep(5)
+                    # Token pode ter expirado entre faixas — renovar antes do retry
+                    session = _refresh_and_save_tokens() or session
+                ok, used_quality, last_combined = _download_once(
+                    rip_bin, url, env, major_ver, download_dir, QUALITY_FALLBACKS)
+                if ok:
+                    break
+
+            results.append({
+                "trackId": tid, "ok": ok, "url": url,
+                "quality": used_quality,
+                "error": None if ok else ((last_combined[-500:] or None)),
+                "output": last_combined[-300:] if ok else None,
+            })
+        except Exception as e:
+            results.append({"trackId": tid, "ok": False, "error": str(e), "url": url})
+        # Flush uma linha por vez para que o chamador acompanhe o progresso
+        print(json.dumps(results[-1], ensure_ascii=False), flush=True)
+    _out({"done": True, "results": results})
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -579,6 +746,11 @@ def main():
             _err("search-artists requer QUERY")
         cmd_search_artists(" ".join(rest))
 
+    elif cmd == "search-tracks":
+        if not rest:
+            _err("search-tracks requer QUERY")
+        cmd_search_tracks(" ".join(rest))
+
     elif cmd == "list-albums":
         if not rest:
             _err("list-albums requer ARTIST_ID")
@@ -589,10 +761,20 @@ def main():
             _err("album-info requer ALBUM_ID")
         cmd_album_info(rest[0])
 
+    elif cmd == "track-info":
+        if not rest:
+            _err("track-info requer TRACK_ID")
+        cmd_track_info(rest[0])
+
     elif cmd == "download-albums":
         if not rest:
             _err("download-albums requer ao menos um ALBUM_ID")
         cmd_download_albums(rest)
+
+    elif cmd == "download-tracks":
+        if not rest:
+            _err("download-tracks requer ao menos um TRACK_ID")
+        cmd_download_tracks(rest)
 
     else:
         _err(f"Comando desconhecido: {cmd}")

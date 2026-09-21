@@ -50,5 +50,9 @@
     "sharp": "^0.33.2",
     "torrent-search-api": "^2.1.4",
     "webtorrent": "^2.4.1"
-  }
+  },
+  "overrides": {
+    "uint8-util": "2.2.6"
+  },
+  "_comment": "overrides.uint8-util: 2.3.x mudou arr2hex para Buffer.from(data.buffer, ...), que lança ERR_INVALID_ARG_TYPE quando recebe string. webtorrent 2.7.0-2.8.5 chama arr2hex(parsedTorrent.infoHash), que É string -> TODO client.add() morre em Torrent._onTorrentId como unhandled rejection. 2.2.6 não lança. Remover o pin só depois de confirmar que a combinação instalada baixa um magnet de verdade."
 }

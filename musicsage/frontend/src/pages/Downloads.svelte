@@ -11,6 +11,10 @@
   // ─── Tabs ────────────────────────────────────────────────
   let activeTab = $state('stormbringer');
 
+  // Pedido do Hermes aguardando o download de torrent que ele originou.
+  // Fica armado da busca até o clique em baixar, e é limpo se a busca mudar.
+  let sbHermesId = $state(null);
+
   // ─── Active downloads monitor ────────────────────────────
   let sbDownloads  = $state([]);
   let tcDownloads  = $state([]);
@@ -23,7 +27,8 @@
 
   onMount(() => {
     loadDownloads();
-    pollId = setInterval(loadDownloads, 5000);
+    loadHermes();
+    pollId = setInterval(() => { loadDownloads(); loadHermes(); }, 5000);
 
     // Handle intent from Recommendations page
     const intent = $downloadIntent;
@@ -78,7 +83,7 @@
   async function tcRetry(jobId) {
     try {
       const r = await api('POST', `/tools/queue/tidal/${jobId}/retry`);
-      toast.success(`Re-baixando ${r.albums} álbum(ns)…`);
+      toast.success(`Re-baixando ${r.albums} ${r.kind === 'track' ? 'faixa(s)' : 'álbum(ns)'}…`);
       await loadDownloads();
     } catch (e) { toast.error(e.message); }
   }
@@ -134,6 +139,7 @@
   function sbClearTypeFields() {
     sbYear = ''; sbSeason = ''; sbEpisode = ''; sbMusicAlbum = '';
     sbResults = []; sbError = ''; sbPage = 0;
+    sbHermesId = null;   // outra busca → não é mais o pedido do Hermes
   }
 
   async function sbSearch() {
@@ -168,22 +174,35 @@
 
   async function sbDownload(torrent) {
     try {
-      const magnet = torrent.magnet ?? torrent.link ?? torrent;
+      // Sem `?? torrent`: alguns provedores (Limetorrents, 1337x) devolvem magnet
+      // E link nulos, e mandar o objeto inteiro fazia o magnet.trim() do servidor
+      // estourar um TypeError sem relação nenhuma com a causa real.
+      const magnet = torrent.magnet ?? torrent.link ?? null;
+      if (typeof magnet !== 'string' || !magnet.trim()) {
+        toast.error(`Resultado sem magnet nem link (${torrent.provider ?? 'provedor desconhecido'}) — escolha outro`);
+        return;
+      }
       if (sbType === 'music') {
         await api('POST', '/tools/stormbringer/download', {
           magnet,
           artist: sbArtist.trim() || undefined,
           album:  sbMusicAlbum.trim() || undefined,
+          hermesId: sbHermesId ?? undefined,
         });
       } else {
         await api('POST', '/tools/stormbringer/download/media', {
           magnet,
           type:  sbType,
           title: sbQuery.trim() || undefined,
+          hermesId: sbHermesId ?? undefined,
         });
       }
       toast.success(`Download iniciado: ${torrent.title ?? torrent.name}`);
+      // O pedido só sai do requests.md quando o torrent concluir — desarmar
+      // aqui evita amarrar o pedido a um segundo download da mesma busca.
+      sbHermesId = null;
       await loadDownloads();
+      await loadHermes();
     } catch (e) { toast.error(e.message); }
   }
 
@@ -205,6 +224,95 @@
       toast('Torrent removido');
       await loadDownloads();
     } catch (e) { toast.error(e.message); }
+  }
+
+  // ─── PEDIDOS DO HERMES ───────────────────────────────────
+  // Caixa de entrada em markdown (DATA_DIR/hermes/requests.md). O item sai do
+  // arquivo sozinho quando o download que ele originou conclui — por isso todo
+  // disparo daqui carrega o hermesId até o fim da cadeia.
+  let hermesItems  = $state([]);
+  let hermesDir    = $state('');
+  let hermesBusy   = $state(null);   // id do pedido em ação
+  let hermesTracks = $state({});     // id do pedido → faixas achadas no Tidal
+  let hermesError  = $state('');
+
+  async function loadHermes() {
+    try {
+      const r = await api('GET', '/hermes/inbox');
+      hermesItems = r.items ?? [];
+      hermesDir   = r.dir ?? '';
+      hermesError = '';
+    } catch (e) {
+      // 503 = canal desligado; o card simplesmente não aparece
+      hermesItems = [];
+      hermesError = e.message;
+    }
+  }
+
+  /**
+   * Dispara o pedido. `force` permite mandar para a outra origem quando o
+   * palpite do parser não foi o que você queria — o item nunca fica preso
+   * na rota errada.
+   */
+  async function hermesGo(item, force = null) {
+    const source = force ?? item.source;
+    hermesBusy = item.id;
+    try {
+      if (item.tidalUrl && source === 'tidal') {
+        // Link direto: não há o que escolher, baixa agora
+        const r = await api('POST', '/tools/tidecaller/download-url', {
+          url: item.tidalUrl, hermesId: item.id,
+        });
+        toast.success(`Download iniciado: ${r.name ?? item.text}`);
+        activeTab = 'tidecaller';
+        await loadDownloads();
+      } else if (source === 'tidal') {
+        // Faixa avulsa sem link: busca no Tidal e deixa você escolher
+        const q = [item.artist, item.title].filter(Boolean).join(' ') || item.text;
+        const tracks = await api('GET', `/tools/tidecaller/track/search?q=${encodeURIComponent(q)}`);
+        hermesTracks = { ...hermesTracks, [item.id]: tracks };
+        if (!tracks.length) {
+          toast.error(`Nada no Tidal para "${q}" — tente o torrent (⚡) ou ajuste o nome no requests.md`);
+        }
+      } else {
+        // Álbum: manda para o Stormbringer com a busca preenchida
+        sbType       = 'music';
+        sbArtist     = item.artist ?? item.text;
+        sbMusicAlbum = item.artist ? (item.title ?? '') : '';
+        sbHermesId   = item.id;
+        activeTab    = 'stormbringer';
+        await sbSearch();
+      }
+    } catch (e) { toast.error(e.message); }
+    finally { hermesBusy = null; }
+  }
+
+  /** Baixa uma faixa escolhida na busca do Tidal, amarrada ao pedido. */
+  async function hermesDownloadTrack(item, track) {
+    hermesBusy = item.id;
+    try {
+      await api('POST', '/tools/tidecaller/download-url', {
+        url: track.url, hermesId: item.id,
+      });
+      toast.success(`Download iniciado: ${track.artist ?? ''} — ${track.name}`);
+      hermesTracks = { ...hermesTracks, [item.id]: [] };
+      activeTab = 'tidecaller';
+      await loadDownloads();
+    } catch (e) { toast.error(e.message); }
+    finally { hermesBusy = null; }
+  }
+
+  /** Tira o pedido da fila sem baixar (vai para done.md como "skipped"). */
+  async function hermesSkip(item) {
+    hermesBusy = item.id;
+    try {
+      await api('POST', `/hermes/inbox/${item.id}/resolve`, {
+        status: 'skipped', detail: 'dispensado na interface',
+      });
+      toast('Pedido dispensado');
+      await loadHermes();
+    } catch (e) { toast.error(e.message); }
+    finally { hermesBusy = null; }
   }
 
   // ─── TIDECALLER ──────────────────────────────────────────
@@ -273,8 +381,8 @@
     if (!url) return;
     tcUrlLoading = true;
     try {
-      const r = await api('POST', '/tools/tidecaller/album/download-url', { url });
-      toast.success(`Download iniciado: ${r.name ?? url}`);
+      const r = await api('POST', '/tools/tidecaller/download-url', { url });
+      toast.success(`Download iniciado: ${r.kind === 'track' ? '♪ ' : ''}${r.name ?? url}`);
       tcUrl = '';
       await loadDownloads();
     } catch (e) { toast.error(e.message); }
@@ -569,6 +677,92 @@
           </div>
         </details>
       {/if}
+    </div>
+  {/if}
+
+  <!-- ── PEDIDOS DO HERMES ─────────────────────────────── -->
+  {#if hermesItems.length}
+    <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:rgba(124,106,245,0.25)">
+      <div class="px-5 py-4 border-b flex items-center gap-2 flex-wrap" style="border-color:#1a1a28">
+        <div class="text-sm font-semibold text-white">✉ Pedidos do Hermes</div>
+        <span class="text-2xs px-2 py-0.5 rounded-full"
+              style="background:rgba(124,106,245,0.18);color:#9d8eff">{hermesItems.length}</span>
+        <div class="flex-1"></div>
+        {#if hermesDir}
+          <code class="text-2xs truncate" style="color:#3a3a58" title={hermesDir}>{hermesDir}/requests.md</code>
+        {/if}
+      </div>
+
+      <div class="divide-y" style="border-color:#1a1a28">
+        {#each hermesItems as item (item.id)}
+          <div class="px-5 py-3">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="text-sm shrink-0" title={item.source === 'tidal' ? 'via Tidal' : 'via torrent'}>
+                {item.source === 'tidal' ? '🌊' : '⚡'}
+              </span>
+
+              <div class="min-w-0 flex-1">
+                <div class="text-sm text-white truncate">
+                  {#if item.artist}
+                    <span style="color:#9999bb">{item.artist}</span>
+                    <span style="color:#3a3a58"> — </span>{item.title}
+                  {:else}
+                    {item.text}
+                  {/if}
+                </div>
+                <div class="text-2xs mt-0.5" style="color:#5a5a78" title={item.reason}>
+                  {item.kind === 'track' ? 'faixa' : item.kind === 'album' ? 'álbum' : 'tipo não informado'}
+                  {#if item.tidalUrl} · link do Tidal{/if}
+                  {#if item.reason} · <span style="color:#3a3a58">{item.reason}</span>{/if}
+                </div>
+              </div>
+
+              <!-- As DUAS origens sempre disponíveis: o palpite do parser é só
+                   um palpite, e um pedido na rota errada tem que ser um clique
+                   de distância da rota certa. -->
+              <div class="flex gap-1.5 shrink-0 items-center">
+                <Button
+                  size="xs"
+                  variant={item.source === 'tidal' ? 'primary' : 'ghost'}
+                  onclick={() => hermesGo(item, 'tidal')}
+                  loading={hermesBusy === item.id}
+                  title="Buscar/baixar no Tidal (FLAC)"
+                >🌊 {item.tidalUrl ? 'Baixar' : 'Tidal'}</Button>
+                <Button
+                  size="xs"
+                  variant={item.source === 'torrent' ? 'primary' : 'ghost'}
+                  onclick={() => hermesGo(item, 'torrent')}
+                  title="Buscar torrent no Stormbringer"
+                >⚡ Torrent</Button>
+                <Button size="xs" variant="ghost" onclick={() => hermesSkip(item)}>dispensar</Button>
+              </div>
+            </div>
+
+            <!-- Faixas achadas no Tidal para este pedido -->
+            {#if hermesTracks[item.id]?.length}
+              <div class="mt-2 ml-8 rounded-lg overflow-hidden" style="background:#0a0a0f;border:1px solid #1a1a28">
+                {#each hermesTracks[item.id] as t}
+                  <button
+                    class="w-full text-left px-3 py-2 flex items-center gap-2 transition-colors hover:bg-[#16161f]"
+                    onclick={() => hermesDownloadTrack(item, t)}
+                  >
+                    <span class="text-2xs shrink-0" style="color:#1db954">↓</span>
+                    <span class="text-2xs truncate flex-1" style="color:#9999bb">
+                      <span class="text-white">{t.name}</span>
+                      {#if t.artist} · {t.artist}{/if}
+                      {#if t.album} · <span style="color:#5a5a78">{t.album}{t.year ? ` (${t.year})` : ''}</span>{/if}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+
+      <div class="px-5 py-2 text-2xs border-t" style="border-color:#1a1a28;color:#3a3a58">
+        Escritos pelo Hermes em <code>requests.md</code>. A linha sai do arquivo quando o download conclui.
+      </div>
     </div>
   {/if}
 
@@ -898,18 +1092,18 @@
         </div>
       </div>
 
-      <!-- Baixar álbum por link do Tidal -->
+      <!-- Baixar álbum OU faixa por link do Tidal -->
       {#if tcTokenValid}
         <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
           <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
-            <div class="text-sm font-semibold text-white">Baixar Álbum por Link</div>
+            <div class="text-sm font-semibold text-white">Baixar por Link</div>
           </div>
           <div class="px-5 py-4">
             <div class="flex gap-2 flex-wrap">
               <input
                 type="text"
                 bind:value={tcUrl}
-                placeholder="https://tidal.com/browse/album/12345678"
+                placeholder="Link de álbum ou de faixa do Tidal…"
                 class="flex-1 min-w-64 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none
                        placeholder:text-[#5a5a78]"
                 style="background:#16161f;border:1px solid #1e1e2e"
@@ -920,7 +1114,9 @@
               <Button size="sm" onclick={tcDownloadFromUrl} loading={tcUrlLoading} disabled={!tcUrl.trim()}>↓ Baixar</Button>
             </div>
             <div class="text-2xs mt-2" style="color:#5a5a78">
-              Cole o link do álbum no Tidal — o progresso aparece em “Downloads Ativos”.
+              Cole o link de um álbum (<code>/album/123</code>) ou de uma música
+              (<code>/track/456</code>) — a faixa avulsa é salva na mesma
+              estrutura de pastas de um álbum. O progresso aparece em “Downloads Ativos”.
             </div>
           </div>
         </div>
