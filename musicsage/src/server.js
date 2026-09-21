@@ -14,6 +14,7 @@ import { lyricsRouter } from "./routes/lyrics.js";
 import { jobsRouter } from "./routes/jobs.js";
 import { favoritesRouter } from "./routes/favorites.js";
 import { weeklyRouter } from "./routes/weekly.js";
+import { hermesRouter } from "./routes/hermes.js";
 import { JobRunner } from "./services/JobRunner.js";
 import { FavoritesService } from "./services/FavoritesService.js";
 import { logger } from "./logger.js";
@@ -27,7 +28,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {{ libraryScanner, historyService, recommendationEngine, playlistBuilder }} deps
  * @returns {import('express').Application}
  */
-export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService } = {}) {
+export function createServer({ libraryScanner, historyService, recommendationEngine, playlistBuilder, mediaServer, embeddingService, clusteringService, metricsService, analyzer, audioAnalyzer, analysisCache, lyricsService, favoritesService, weeklyDiscoveryService, hermesInbox } = {}) {
   const app = express();
 
   app.use(express.json({ limit: '10mb' })); // tracks Plex são ~3KB cada; playlists grandes podem exceder 100 KB
@@ -64,7 +65,8 @@ export function createServer({ libraryScanner, historyService, recommendationEng
   embeddingsRouter(router, { embeddingService, clusteringService, playlistBuilder, analysisCache });
   audioRouter(router, { analyzer, embeddingService, audioAnalyzer, playlistBuilder, mediaPlaylists, analysisCache, libraryScanner });
   lyricsRouter(router, { lyricsService, libraryScanner });
-  toolsRouter(router);
+  toolsRouter(router, { hermesInbox });
+  hermesRouter(router, { hermesInbox, libraryScanner });
   plexRouter(router, { mediaServer });
   jobsRouter(router, { jobRunner });
 

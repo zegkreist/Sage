@@ -50,6 +50,7 @@ const LEVEL_COLOR = { INFO: C.green, WARN: C.yellow, ERROR: C.red, DEBUG: C.dim 
 const CAT_COLOR   = {
   SERVER: C.green, HTTP: C.cyan, LIBRARY: C.cyan,
   PLAYLIST: C.magenta, RECOMMEND: C.blue, OLLAMA: C.magenta,
+  TIDAL: C.blue, STORMBRINGER: C.yellow, HERMES: C.magenta, TRANSPORTER: C.cyan,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

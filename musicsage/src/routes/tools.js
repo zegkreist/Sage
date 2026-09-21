@@ -11,7 +11,9 @@
  *   POST /api/tools/stormbringer/download      — baixa torrent de música por magnet
  *   POST /api/tools/stormbringer/download/media — baixa torrent de filme/série por magnet
  *   POST /api/tools/tidecaller/download        — inicia download via TideCaller/streamrip
- *   POST /api/tools/tidecaller/album/download-url — baixa um álbum por link do Tidal
+ *   GET  /api/tools/tidecaller/track/search    — busca faixas no Tidal por texto
+ *   POST /api/tools/tidecaller/download-url    — baixa álbum OU faixa por link do Tidal
+ *   POST /api/tools/tidecaller/album/download-url — alias legado do anterior
  *   POST /api/tools/transporter/run            — move downloads para o Plex
  */
 import { randomUUID } from "crypto";
@@ -169,6 +171,7 @@ async function getDmInstance() {
     // o Transporter automaticamente (se o toggle estiver ligado)
     _dmInstance.on("completed", (ti) => {
       _pushQueueHistory({ source: "torrent", id: ti?.infoHash, title: ti?.name, status: "done" });
+      _resolveHermes(ti?.metadata?.hermesId, ti?.name, "torrent");
       if (!_autoTransporter) return;
       const typeMap = { music: "music", movie: "movies", movies: "movies", series: "series", tv: "series" };
       const target = typeMap[ti?.type];
@@ -183,6 +186,10 @@ async function getDmInstance() {
   }
   return _dmInstance;
 }
+
+// Ponte para o canal do Hermes — preenchida por toolsRouter(). Fica no escopo
+// de módulo porque o singleton do DownloadManager nasce fora do router.
+let _resolveHermes = () => {};
 
 // Sessões OAuth em andamento (limpas após 5 min)
 const _oauthSessions = new Map();
@@ -274,16 +281,69 @@ const _TC_VENV_PYTHON = join(TIDECALLER_DIR, ".venv_tidal", "bin", "python3");
 const TC_PYTHON = existsSync(_TC_VENV_PYTHON) ? _TC_VENV_PYTHON : "python3";
 const TC_QUERY  = join(TIDECALLER_DIR, "scripts", "tidal_query.py");
 
-/** Executa tidal_query.py e resolve com o JSON parseado da última linha. */
+/**
+ * Executa tidal_query.py e resolve com o JSON parseado da última linha.
+ *
+ * Toda falha vira um Error com causa explícita. A versão anterior resolvia com
+ * `{ raw: "<texto>" }` quando a saída não era JSON — e como os chamadores fazem
+ * `Array.isArray(data) ? data : []`, uma busca quebrada virava "nenhum
+ * resultado" silencioso, indistinguível de uma busca legítima sem resultados.
+ */
 function tidalQuery(args, timeoutMs = 20000) {
+  const cmd = `${args[0]} ${args.slice(1).join(" ")}`.trim();
+  const startedAt = Date.now();
+
   return new Promise((resolve, reject) => {
     const env = { ...process.env, XDG_CONFIG_HOME: join(TIDECALLER_DIR, "config", ".config") };
+    logger.debug("TIDAL", `tidal_query.py ${cmd} (python=${TC_PYTHON}, timeout=${timeoutMs}ms)`);
+
     execFile(TC_PYTHON, [TC_QUERY, ...args], { env, cwd: TIDECALLER_DIR, timeout: timeoutMs }, (err, stdout, stderr) => {
-      const last = (stdout || "").trim().split("\n").filter(Boolean).pop() || "{}";
+      const ms = Date.now() - startedAt;
+      const out = (stdout || "").trim();
+      const errOut = (stderr || "").trim();
+
+      // stderr do script é diagnóstico ([WARN] token, config...), não é falha
+      // por si — mas some se não for registrado.
+      if (errOut) logger.warn("TIDAL", `${cmd} — stderr: ${errOut.slice(-400)}`);
+
+      const fail = (msg) => {
+        logger.error("TIDAL", `${cmd} falhou em ${ms}ms — ${msg}`);
+        reject(new Error(msg));
+      };
+
+      // Processo nem rodou / morreu
+      if (err?.code === "ENOENT") {
+        return fail(`Python não encontrado em "${TC_PYTHON}" — o venv do TideCaller não existe nesta imagem`);
+      }
+      if (err?.killed) {
+        return fail(`Tempo esgotado (${ms}ms, limite ${timeoutMs}ms) em "${cmd}" — o Tidal ou a rede estão lentos`);
+      }
+
+      if (!out) {
+        return fail(
+          `tidal_query.py não produziu saída (exit ${err?.code ?? 0})`
+          + (errOut ? ` — stderr: ${errOut.slice(-300)}` : " e stderr vazio"),
+        );
+      }
+
+      const last = out.split("\n").filter(Boolean).pop();
       let data;
-      try { data = JSON.parse(last); } catch { data = { raw: last }; }
-      if (data?.error) return reject(new Error(data.error));
-      if (err && !stdout) return reject(new Error(stderr || err.message));
+      try {
+        data = JSON.parse(last);
+      } catch {
+        // Aqui estava o buraco: saída não-JSON virava resultado vazio.
+        return fail(
+          `saída do tidal_query.py não é JSON — provável erro do Python antes de imprimir o resultado. `
+          + `Última linha: ${last.slice(0, 300)}`
+          + (errOut ? ` | stderr: ${errOut.slice(-300)}` : ""),
+        );
+      }
+
+      if (data?.error) return fail(data.error);
+      if (err) return fail(`exit ${err.code ?? "?"}: ${errOut.slice(-300) || err.message}`);
+
+      const size = Array.isArray(data) ? `${data.length} resultado(s)` : "objeto";
+      logger.debug("TIDAL", `${cmd} ok em ${ms}ms — ${size}`);
       resolve(data);
     });
   });
@@ -303,24 +363,50 @@ function parseTidalAlbumId(url) {
 }
 
 /**
- * Registra um job de download de álbuns e dispara o tidal_query.py em background,
- * atualizando o job conforme as linhas JSON de progresso chegam.
- * Compartilhado pelo download por artista e pelo download por link do Tidal.
+ * Extrai o ID numérico de um link de FAIXA do Tidal.
+ * Aceita tidal.com/track/ID, tidal.com/browse/track/ID, listen.tidal.com/track/ID
+ * e a forma aninhada listen.tidal.com/album/ALBUM_ID/track/ID.
+ * Retorna null se não for um link de faixa.
+ *
+ * Precisa ser testado ANTES de parseTidalAlbumId: a forma aninhada casa com os
+ * dois regexes, e o que o usuário pediu nesse caso é a faixa, não o álbum.
  */
-function startTidalAlbumJob(ids, albumMeta, artistName) {
+function parseTidalTrackId(url) {
+  const s = String(url || "").trim();
+  const m = s.match(/tidal\.com\/(?:browse\/)?(?:album\/\d+\/)?track\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Registra um job de download do TideCaller e dispara o tidal_query.py em
+ * background, atualizando o job conforme as linhas JSON de progresso chegam.
+ * Compartilhado pelo download por artista, por link de álbum e por link de faixa.
+ *
+ * @param {string[]} ids   — IDs de álbum (kind="album") ou de faixa (kind="track")
+ * @param {Record<string,string>} meta — id → nome amigável
+ * @param {string|null} artistName
+ * @param {"album"|"track"} kind
+ */
+function startTidalJob(ids, meta, artistName, kind = "album", hermesId = null) {
+  const isTrack = kind === "track";
+  // O campo continua se chamando `albums` porque a UI e a fila unificada já
+  // consomem esse nome — `kind` é o que diferencia faixa de álbum.
+  const unit = isTrack ? "faixas" : "álbuns";
   const jobId = randomUUID();
   const job = {
     jobId,
+    kind,
+    hermesId,
     artistName: artistName || null,
     startedAt:  new Date().toISOString(),
     finishedAt: null,
     status: "running",
-    albums: ids.map(id => ({ id, name: albumMeta[id] || id, status: "pending" })),
+    albums: ids.map(id => ({ id, name: meta[id] || id, status: "pending" })),
     lastError: null,
   };
   _tidalJobs.set(jobId, job);
 
-  const label = artistName ? `${artistName} (${ids.length} álbuns)` : `${ids.length} álbuns`;
+  const label = artistName ? `${artistName} (${ids.length} ${unit})` : `${ids.length} ${unit}`;
   logger.info("SERVER", `TideCaller download iniciado — jobId=${jobId} ${label}`);
 
   const _tcDownloads = join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller");
@@ -330,7 +416,8 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
     TIDECALLER_DOWNLOADS: _tcDownloads,
   };
   logger.info("SERVER", `TideCaller download dir: ${_tcDownloads}`);
-  const proc = spawn(TC_PYTHON, [TC_QUERY, "download-albums", ...ids], {
+  const command = isTrack ? "download-tracks" : "download-albums";
+  const proc = spawn(TC_PYTHON, [TC_QUERY, command, ...ids], {
     cwd: TIDECALLER_DIR, env, stdio: ["ignore", "pipe", "pipe"],
   });
   _tidalProcs.set(jobId, proc);
@@ -345,8 +432,9 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
       if (!t) continue;
       try {
         const parsed = JSON.parse(t);
-        if (parsed.albumId) {
-          const entry = job.albums.find(a => a.id === parsed.albumId);
+        const itemId = isTrack ? parsed.trackId : parsed.albumId;
+        if (itemId) {
+          const entry = job.albums.find(a => a.id === itemId);
           if (entry) {
             entry.status = parsed.ok ? "done" : "error";
             if (parsed.error) entry.lastError = parsed.error;
@@ -356,15 +444,19 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
               entry.complete = parsed.complete;
             }
             const icon = parsed.ok ? "✓" : "✗";
+            const what = isTrack ? "faixa" : "álbum";
             const qualityNote = parsed.quality != null ? ` (q=${parsed.quality})` : "";
             const tracksNote = parsed.tracksExpected != null ? ` [${parsed.tracksDownloaded ?? "?"}/${parsed.tracksExpected}]` : "";
-            logger.info("SERVER", `TideCaller [${icon}] álbum jobId=${jobId} id=${parsed.albumId} "${entry.name}"${qualityNote}${tracksNote}`);
-            if (!parsed.ok && parsed.error) logger.warn("SERVER", `TideCaller erro álbum ${parsed.albumId}: ${parsed.error}`);
-            if (parsed.ok && parsed.output)  logger.info("SERVER", `TideCaller saida álbum ${parsed.albumId}: ${parsed.output}`);
+            logger.info("SERVER", `TideCaller [${icon}] ${what} jobId=${jobId} id=${itemId} "${entry.name}"${qualityNote}${tracksNote}`);
+            if (!parsed.ok && parsed.error) logger.warn("SERVER", `TideCaller erro ${what} ${itemId}: ${parsed.error}`);
+            if (parsed.ok && parsed.output)  logger.info("SERVER", `TideCaller saida ${what} ${itemId}: ${parsed.output}`);
           }
-        } else if (parsed.done) {
-          job.status = "done";
         }
+        // A linha-resumo final ({done:true}) é ignorada de propósito: ela diz
+        // que o processo terminou de enumerar os itens, NÃO que deram certo.
+        // Marcar job.status="done" aqui fazia o job aparecer concluído mesmo
+        // com todas as faixas/álbuns em erro (e ainda disparava o Transporter
+        // à toa) — o status real sai do 'close', pela contagem de itens.
       } catch { /* non-JSON line — ignore */ }
     }
   });
@@ -384,6 +476,9 @@ function startTidalAlbumJob(ids, albumMeta, artistName) {
     _pushQueueHistory({ source: "tidal", id: jobId, title: label, status: job.status, finishedAt: job.finishedAt, error: job.lastError });
     // Fila unificada: downloads do Tidal prontos → transporta pra biblioteca
     if (_autoTransporter && job.status === "done") runTransporter("music", { auto: true });
+    // Só conclui o pedido do Hermes se deu certo de verdade — item com erro
+    // continua no requests.md para ser re-tentado.
+    if (job.status === "done") _resolveHermes(job.hermesId, label, "tidal");
     // Limpar após 60 min
     setTimeout(() => _tidalJobs.delete(jobId), 60 * 60 * 1000);
   });
@@ -429,6 +524,49 @@ function spawnDetached(cmd, args, cwd, opts = {}) {
   });
 }
 
+/**
+ * Estado atual da fila unificada (torrent + tidal + transporter).
+ * Exportado porque o canal do Hermes escreve o mesmo conteúdo em status.md —
+ * a rota /tools/queue e o status.md não podem divergir.
+ */
+export function queueSnapshot() {
+  const items = [];
+  try {
+    const torrents = _dmInstance ? _dmInstance.getActiveTorrents() : [];
+    for (const t of torrents) {
+      items.push({
+        source: "torrent", id: t.infoHash, title: t.name, type: t.type,
+        status: t.status, pct: Math.round(t.progress ?? 0),
+        speed: t.downloadSpeed, peers: t.peers, startedAt: t.startTime,
+      });
+    }
+  } catch { /* DM não iniciado — segue sem torrents */ }
+  for (const j of _tidalJobs.values()) {
+    const done = j.albums.filter(a => a.status === "done").length;
+    const total = j.albums.length || 1;
+    const unit = j.kind === "track" ? "faixas" : "álbuns";
+    items.push({
+      source: "tidal", id: j.jobId, kind: j.kind ?? "album",
+      title: j.artistName ? `TideCaller — ${j.artistName}` : `TideCaller — ${unit}`,
+      status: j.status, pct: Math.round((done / total) * 100),
+      stage: `${done}/${total} ${unit}`, startedAt: j.startedAt,
+      albums: j.albums, lastError: j.lastError,
+    });
+  }
+  for (const r of _transporterRuns.values()) {
+    items.push({
+      source: "transporter", id: r.id, title: r.title,
+      status: r.status, startedAt: r.startedAt, auto: r.auto, exitCode: r.exitCode,
+    });
+  }
+  return {
+    items,
+    history: _readJsonSafe(_QUEUE_HISTORY_FILE, []).slice(0, 30),
+    autoTransporter: _autoTransporter,
+    updatedAt: Date.now(),
+  };
+}
+
 const SEARCH_TIMEOUT_MS = 60_000;
 
 /** Wraps a search promise with a timeout to prevent the route hanging forever. */
@@ -449,16 +587,34 @@ function withSearchTimeout(promise, label = "") {
   ]);
 }
 
-export function toolsRouter(router) {
+export function toolsRouter(router, { hermesInbox } = {}) {
+  // Conclui o pedido do Hermes quando o download que ele originou termina —
+  // é o que faz a linha sair do requests.md sozinha.
+  _resolveHermes = (hermesId, detail, source) => {
+    if (!hermesId || !hermesInbox) return;
+    try {
+      hermesInbox.resolve(hermesId, { status: "done", detail, source });
+    } catch (err) {
+      logger.warn("HERMES", `Falha ao concluir pedido ${hermesId}: ${err.message}`);
+    }
+  };
+
   // ── POST /api/tools/stormbringer/search ──────────────────────────────────
   router.post("/tools/stormbringer/search", async (req, res) => {
     const { artist, album } = req.body || {};
     if (!artist?.trim()) return res.status(400).json({ error: "'artist' é obrigatório" });
 
     try {
-      logger.info("SERVER", `Stormbringer search music: "${artist}" / "${album || ""}"`);
+      logger.info("SERVER", `Stormbringer busca música: artista="${artist}" álbum="${album || "(qualquer)"}"`);
       const ts = await getTorrentSearch();
       const results = await withSearchTimeout(ts.searchMusic(artist.trim(), album?.trim() || null), `music: ${artist}`);
+
+      if (results.length) {
+        const best = results[0];
+        logger.info("SERVER", `Stormbringer → ${results.length} resultado(s); melhor: "${best.title}" (${best.seeds} seeds, ${best.provider})`);
+      } else {
+        logger.warn("SERVER", `Stormbringer → 0 resultados para "${artist}${album ? " " + album : ""}". Ou nenhum indexer do Jackett tem esse álbum, ou os indexers estão com erro — confira as linhas [STORMBRINGER] "Jackett retornou N resultados (M indexers)" acima.`);
+      }
 
       const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
       res.json(
@@ -602,7 +758,7 @@ export function toolsRouter(router) {
   // ── POST /api/tools/stormbringer/download ─────────────────────────────────
   // Body: { magnet, artist?, album? }  — baixa torrent de MÚSICA
   router.post("/tools/stormbringer/download", async (req, res) => {
-    const { magnet, artist, album } = req.body || {};
+    const { magnet, artist, album, hermesId = null } = req.body || {};
     if (!magnet?.trim()) return res.status(400).json({ error: "'magnet' é obrigatório" });
     logger.info("SERVER", `Stormbringer download recebido — tipo=${typeof magnet} valor=${String(magnet).slice(0, 120)}`);
     try {
@@ -611,6 +767,7 @@ export function toolsRouter(router) {
       dm.addTorrent(torrentId, "music", {
         artist: artist?.trim() || "Unknown",
         album:  album?.trim()  || "Unknown",
+        hermesId,
       }).catch(err => logger.error("SERVER", `Stormbringer DL error: ${err.message}`));
       res.json({ ok: true, status: "downloading", magnet: magnet.trim() });
     } catch (err) {
@@ -624,19 +781,22 @@ export function toolsRouter(router) {
   // ── POST /api/tools/stormbringer/download/media ───────────────────────────
   // Body: { magnet, type: "movie"|"series", title? }
   router.post("/tools/stormbringer/download/media", async (req, res) => {
-    const { magnet, type, title } = req.body || {};
+    const { magnet, type, title, hermesId = null } = req.body || {};
     if (!magnet?.trim()) return res.status(400).json({ error: "'magnet' é obrigatório" });
     if (!type || !['movie','series'].includes(type)) return res.status(400).json({ error: "'type' deve ser 'movie' ou 'series'" });
     try {
-      logger.info("SERVER", `Stormbringer download media: type=${type} title="${title || ""}"`);
+      // O valor cru vai no log igual ao /download: quando o indexer devolve um
+      // magnet sem xt=urn:btih: utilizável, é a única forma de saber qual foi.
+      logger.info("SERVER", `Stormbringer download media: type=${type} title="${title || ""}" tipo=${typeof magnet} valor=${String(magnet).slice(0, 200)}`);
       const torrentId = await resolveTorrentId(magnet.trim());
       const dm = await getDmInstance();
       dm.addTorrent(torrentId, type, {
         title: title?.trim() || "Unknown",
+        hermesId,
       }).catch(err => logger.error("SERVER", `Stormbringer media DL error: ${err.message}`));
       res.json({ ok: true, status: "downloading", type, magnet: magnet.trim() });
     } catch (err) {
-      logger.error("SERVER", `Stormbringer media download error: ${err.message}`);
+      logger.error("SERVER", `Stormbringer media download error: ${err.message} | magnet_start=${String(magnet).slice(0, 120)}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -778,11 +938,36 @@ export function toolsRouter(router) {
   router.get("/tools/tidecaller/artist/search", async (req, res) => {
     const q = (req.query.q || "").trim();
     if (!q) return res.status(400).json({ error: "'q' é obrigatório" });
+    logger.info("TIDAL", `Buscando artista: "${q}"`);
     try {
       const artists = await tidalQuery(["search-artists", q]);
-      res.json(Array.isArray(artists) ? artists : []);
+      const list = Array.isArray(artists) ? artists : [];
+      if (list.length) logger.info("TIDAL", `"${q}" → ${list.length} artista(s)`);
+      else logger.warn("TIDAL", `"${q}" → nenhum artista no Tidal`);
+      res.json(list);
     } catch (err) {
-      logger.error("SERVER", `TideCaller artist search error: ${err.message}`);
+      logger.error("TIDAL", `Busca de artista "${q}" FALHOU: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/tools/tidecaller/track/search?q=QUERY ───────────────────────
+  // Usado quando um pedido pede uma música só e não veio com link do Tidal.
+  router.get("/tools/tidecaller/track/search", async (req, res) => {
+    const q = (req.query.q || "").trim();
+    if (!q) return res.status(400).json({ error: "'q' é obrigatório" });
+    logger.info("TIDAL", `Buscando faixa: "${q}"`);
+    try {
+      const tracks = await tidalQuery(["search-tracks", q]);
+      const list = Array.isArray(tracks) ? tracks : [];
+      if (list.length) {
+        logger.info("TIDAL", `"${q}" → ${list.length} faixa(s); 1ª: "${list[0].name}" de ${list[0].artist ?? "?"}`);
+      } else {
+        logger.warn("TIDAL", `"${q}" → nenhuma faixa. Busca funcionou, o Tidal é que não tem esse título — tente só "artista nome da música", sem álbum/ano, ou marque #torrent no pedido.`);
+      }
+      res.json(list);
+    } catch (err) {
+      logger.error("TIDAL", `Busca de faixa "${q}" FALHOU: ${err.message}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -801,46 +986,60 @@ export function toolsRouter(router) {
   // ── POST /api/tools/tidecaller/artist/download-albums ────────────────────
   // Body: { albums: [{id, name}], artistName? }
   router.post("/tools/tidecaller/artist/download-albums", async (req, res) => {
-    const { albums, artistName } = req.body || {};
+    const { albums, artistName, hermesId = null } = req.body || {};
     if (!Array.isArray(albums) || !albums.length) {
       return res.status(400).json({ error: "'albums' deve ser array não vazio" });
     }
     const ids = albums.map(a => String(a.id || a));
     const albumMeta = Object.fromEntries(albums.map(a => [String(a.id || a), a.name || a.id]));
 
-    const job = startTidalAlbumJob(ids, albumMeta, artistName);
+    const job = startTidalJob(ids, albumMeta, artistName, "album", hermesId);
     res.json({ ok: true, jobId: job.jobId, status: "running", count: ids.length, albumIds: ids });
   });
 
-  // ── POST /api/tools/tidecaller/album/download-url ────────────────────────
-  // Body: { url }  — baixa um álbum a partir de um link do Tidal
-  router.post("/tools/tidecaller/album/download-url", async (req, res) => {
-    const { url } = req.body || {};
+  // ── POST /api/tools/tidecaller/download-url ──────────────────────────────
+  // Body: { url }  — baixa um ÁLBUM ou uma FAIXA a partir de um link do Tidal.
+  // A faixa avulsa cai na mesma estrutura de pastas de um álbum (ver
+  // _patch_config_singles_folder no tidal_query.py) — sem isso o Transporter,
+  // que só varre diretórios, nunca moveria o arquivo solto para a biblioteca.
+  const tidalDownloadByUrl = async (req, res) => {
+    const { url, hermesId = null } = req.body || {};
     if (!url?.trim()) return res.status(400).json({ error: "'url' é obrigatório" });
 
-    const albumId = parseTidalAlbumId(url);
-    if (!albumId) {
+    // Faixa primeiro: .../album/ID/track/ID casa com os dois parsers e o que
+    // o usuário colou nesse caso é a faixa.
+    const trackId = parseTidalTrackId(url);
+    const albumId = trackId ? null : parseTidalAlbumId(url);
+    if (!trackId && !albumId) {
       return res.status(400).json({
-        error: "Link inválido — informe um link de álbum do Tidal (ex.: https://tidal.com/browse/album/12345678)",
+        error: "Link inválido — informe um link de álbum ou de faixa do Tidal "
+             + "(ex.: https://tidal.com/browse/album/12345678 ou https://tidal.com/browse/track/12345678)",
       });
     }
 
+    const kind = trackId ? "track" : "album";
+    const id   = trackId ?? albumId;
+
     // Metadados são best-effort: o download roda pelo mesmo caminho do fluxo por
-    // artista (download-albums ID), então uma falha aqui só custa o nome bonito.
-    let name = `Álbum ${albumId}`;
+    // artista, então uma falha aqui só custa o nome bonito.
+    let name = trackId ? `Faixa ${id}` : `Álbum ${id}`;
     let artistName = null;
     try {
-      const info = await tidalQuery(["album-info", albumId]);
+      const info = await tidalQuery([trackId ? "track-info" : "album-info", id]);
       if (info?.name)   name       = info.name;
       if (info?.artist) artistName = info.artist;
     } catch (err) {
-      logger.warn("SERVER", `TideCaller album-info falhou para ${albumId}: ${err.message}`);
+      logger.warn("SERVER", `TideCaller ${kind}-info falhou para ${id}: ${err.message}`);
     }
 
-    const job = startTidalAlbumJob([albumId], { [albumId]: name }, artistName);
-    logger.info("SERVER", `TideCaller download por link — album=${albumId} "${name}"`);
-    res.json({ ok: true, jobId: job.jobId, status: "running", albumId, name, artistName });
-  });
+    const job = startTidalJob([id], { [id]: name }, artistName, kind, hermesId);
+    logger.info("SERVER", `TideCaller download por link — ${kind}=${id} "${name}"`);
+    res.json({ ok: true, jobId: job.jobId, status: "running", kind, id, albumId, trackId, name, artistName });
+  };
+
+  router.post("/tools/tidecaller/download-url", tidalDownloadByUrl);
+  // Alias legado — a rota antiga só aceitava álbum; agora aceita os dois.
+  router.post("/tools/tidecaller/album/download-url", tidalDownloadByUrl);
 
   // ── POST /api/tools/tidecaller/download ──────────────────────────────────
   // Body: { url? } OU { artist, album?, quality? }
@@ -909,40 +1108,7 @@ export function toolsRouter(router) {
 
   // ── GET /api/tools/queue — fila unificada (torrent + tidal + transporter) ──
   router.get("/tools/queue", (_req, res) => {
-    const items = [];
-    try {
-      const torrents = _dmInstance ? _dmInstance.getActiveTorrents() : [];
-      for (const t of torrents) {
-        items.push({
-          source: "torrent", id: t.infoHash, title: t.name, type: t.type,
-          status: t.status, pct: Math.round(t.progress ?? 0),
-          speed: t.downloadSpeed, peers: t.peers, startedAt: t.startTime,
-        });
-      }
-    } catch { /* DM não iniciado — segue sem torrents */ }
-    for (const j of _tidalJobs.values()) {
-      const done = j.albums.filter(a => a.status === "done").length;
-      const total = j.albums.length || 1;
-      items.push({
-        source: "tidal", id: j.jobId,
-        title: j.artistName ? `TideCaller — ${j.artistName}` : "TideCaller — álbuns",
-        status: j.status, pct: Math.round((done / total) * 100),
-        stage: `${done}/${total} álbuns`, startedAt: j.startedAt,
-        albums: j.albums, lastError: j.lastError,
-      });
-    }
-    for (const r of _transporterRuns.values()) {
-      items.push({
-        source: "transporter", id: r.id, title: r.title,
-        status: r.status, startedAt: r.startedAt, auto: r.auto, exitCode: r.exitCode,
-      });
-    }
-    res.json({
-      items,
-      history: _readJsonSafe(_QUEUE_HISTORY_FILE, []).slice(0, 30),
-      autoTransporter: _autoTransporter,
-      updatedAt: Date.now(),
-    });
+    res.json(queueSnapshot());
   });
 
   // ── POST /api/tools/settings — toggles da fila (persistido em settings.json) ──
@@ -967,7 +1133,7 @@ export function toolsRouter(router) {
     if (proc) proc.kill("SIGTERM");
     job.status = "cancelled";
     job.finishedAt = new Date().toISOString();
-    _pushQueueHistory({ source: "tidal", id: job.jobId, title: job.artistName || "TideCaller — álbuns", status: "cancelled", finishedAt: job.finishedAt });
+    _pushQueueHistory({ source: "tidal", id: job.jobId, title: job.artistName || `TideCaller — ${job.kind === "track" ? "faixas" : "álbuns"}`, status: "cancelled", finishedAt: job.finishedAt });
     logger.warn("SERVER", `TideCaller job cancelado jobId=${req.params.id}`);
     res.json({ ok: true });
   });
@@ -977,10 +1143,10 @@ export function toolsRouter(router) {
     const job = _tidalJobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: "Job não encontrado" });
     const failed = job.albums.filter(a => a.status === "error").map(a => a.id);
-    if (!failed.length) return res.status(409).json({ error: "Nenhum álbum com erro para re-tentar" });
+    if (!failed.length) return res.status(409).json({ error: "Nenhum item com erro para re-tentar" });
     const meta = Object.fromEntries(job.albums.map(a => [a.id, a.name]));
-    const newJob = startTidalAlbumJob(failed, meta, job.artistName);
-    res.json({ jobId: newJob.jobId, albums: failed.length });
+    const newJob = startTidalJob(failed, meta, job.artistName, job.kind ?? "album", job.hermesId);
+    res.json({ jobId: newJob.jobId, kind: newJob.kind, albums: failed.length });
   });
 
   return router;
