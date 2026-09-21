@@ -388,3 +388,58 @@ describe("DownloadManager - Testes de Integração", () => {
     });
   });
 });
+
+describe("DownloadManager.assertValidTorrentId", () => {
+  const HASH = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
+  const BASE32 = "2ZBFL3G4PSSV7MF36ATSHWDQML3R63I4";
+
+  test("aceita magnet com xt=urn:btih: em hex, base32 e maiúsculas", () => {
+    expect(DownloadManager.assertValidTorrentId(`magnet:?xt=urn:btih:${HASH}&dn=x`)).toContain(HASH);
+    expect(DownloadManager.assertValidTorrentId(`magnet:?dn=x&xt=urn:btih:${HASH}`)).toContain(HASH);
+    expect(DownloadManager.assertValidTorrentId(`magnet:?xt=urn:btih:${HASH.toUpperCase()}`)).toBeTruthy();
+    expect(DownloadManager.assertValidTorrentId(`magnet:?xt=urn:btih:${BASE32}&dn=x`)).toBeTruthy();
+  });
+
+  test("aceita infoHash cru e URL http(s)", () => {
+    expect(DownloadManager.assertValidTorrentId(HASH)).toBe(HASH);
+    expect(DownloadManager.assertValidTorrentId(BASE32)).toBe(BASE32);
+    expect(DownloadManager.assertValidTorrentId("https://jackett/dl/x?apikey=y")).toContain("https://");
+  });
+
+  // Estes são os inputs que faziam arr2hex(undefined) explodir dentro do
+  // webtorrent como unhandled rejection, deixando o addTorrent() pendurado.
+  test("rejeita magnet sem xt=urn:btih: utilizável", () => {
+    const invalidos = [
+      "magnet:?dn=x&tr=udp%3A%2F%2Ffoo",                                    // sem xt
+      "magnet:?xt=urn:btih:NOTAHASH&dn=x",                                  // hash malformado
+      `magnet:?xt.1=urn:btih:${HASH}&dn=x`,                                 // variante que magnet-uri ignora
+      "magnet:?xt=urn:btmh:1220caf1e1c30e81cb361b9ee167c4aa64228a7fa4fa9",  // só BitTorrent v2
+    ];
+    for (const m of invalidos) {
+      expect(() => DownloadManager.assertValidTorrentId(m)).toThrow(/xt=urn:btih/);
+    }
+  });
+
+  test("rejeita buffer que não é bencode (HTML de erro do indexer)", () => {
+    const html = Buffer.from("<!DOCTYPE html><html><body>403 Forbidden</body></html>");
+    expect(() => DownloadManager.assertValidTorrentId(html)).toThrow(/não é um \.torrent/);
+    expect(() => DownloadManager.assertValidTorrentId(Buffer.alloc(0))).toThrow(/não é um \.torrent/);
+  });
+
+  test("aceita buffer bencodado", () => {
+    const bencoded = Buffer.from("d4:infod4:name3:abcee");
+    expect(DownloadManager.assertValidTorrentId(bencoded)).toBe(bencoded);
+  });
+
+  test("rejeita null/undefined/objeto", () => {
+    for (const v of [null, undefined, 42, {}, ""]) {
+      expect(() => DownloadManager.assertValidTorrentId(v)).toThrow(/inválido|não reconhecido/);
+    }
+  });
+
+  test("addTorrent lança de forma SÍNCRONA, sem devolver promise pendurada", () => {
+    // Sem client: o throw tem que acontecer antes de qualquer uso de this.client.
+    const fake = Object.create(DownloadManager.prototype);
+    expect(() => fake.addTorrent("magnet:?dn=sem-hash", "music", {})).toThrow(/xt=urn:btih/);
+  });
+});
