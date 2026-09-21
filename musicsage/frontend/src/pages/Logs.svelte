@@ -108,22 +108,42 @@
     if (logEl) setTimeout(() => { logEl.scrollTop = logEl.scrollHeight; }, 0);
   }
 
+  /**
+   * Zera o log de hoje.
+   *
+   * Recarrega do servidor em vez de mexer no estado local. Limpar só o array
+   * `lines` deixava três coisas erradas: o `todayOffset` continuava apontando
+   * para o tamanho ANTIGO do arquivo (o próximo polling incremental pedia um
+   * trecho que não existe mais), a view não limpava se o arquivo de hoje
+   * estivesse selecionado pelo NOME na lista lateral (aí `selectedFile` não é
+   * null e o botão parecia não fazer nada), e a lista continuava mostrando o
+   * tamanho anterior.
+   */
   async function clearToday() {
     if (!confirm('Zerar o log de hoje?')) return;
     try {
       await api('DELETE', '/logs');
+      // Volta para a view de hoje: o arquivo selecionado pode ser justamente
+      // o de hoje, e continuar exibindo as linhas antigas seria mentira.
+      selectedFile = null;
+      todayOffset  = 0;
+      await loadAll();
       toast.success('Log de hoje zerado');
-      if (!selectedFile) lines = [];
-    } catch (e) { toast.error(e.message); }
+      scrollToBottom();
+    } catch (e) { toast.error(`Falha ao zerar o log: ${e.message}`); }
   }
 
   async function clearAll() {
     if (!confirm('Remover TODOS os arquivos de log? Esta ação não pode ser desfeita.')) return;
     try {
       const res = await api('DELETE', '/logs/all');
+      // O servidor grava a própria remoção no log, então o arquivo de hoje
+      // renasce na hora — zerar `files` na mão mostraria uma lista vazia falsa.
+      selectedFile = null;
+      todayOffset  = 0;
+      await loadAll();
       toast.success(res.message ?? 'Todos os logs removidos');
-      lines = []; files = []; selectedFile = null;
-    } catch (e) { toast.error(e.message); }
+    } catch (e) { toast.error(`Falha ao remover os logs: ${e.message}`); }
   }
 
   let filteredLines = $derived(lines.filter(l => {
