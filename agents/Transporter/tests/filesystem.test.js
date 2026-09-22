@@ -113,3 +113,59 @@ describe("removeIfEmpty", () => {
     expect(fs.existsSync(tmp)).toBe(true);
   });
 });
+
+// ─── Permissões da biblioteca ─────────────────────────────────────────────────
+
+describe("permissões", () => {
+  const mode = p => fs.statSync(p).mode & 0o777;
+
+  test("moveFile deixa o arquivo gravável por qualquer usuário", () => {
+    const src = path.join(tmp, "dl", "faixa.flac");
+    touch(src);
+    fs.chmodSync(src, 0o600);            // como o webtorrent/streamrip costuma criar
+    const dest = path.join(tmp, "lib", "Artista", "Álbum", "faixa.flac");
+
+    moveFile(src, dest);
+
+    expect(mode(dest)).toBe(0o666);
+  });
+
+  test("as pastas criadas pelo move são atravessáveis e graváveis", () => {
+    const src = path.join(tmp, "dl", "faixa.flac");
+    touch(src);
+    const dest = path.join(tmp, "lib", "Artista", "Álbum", "faixa.flac");
+
+    moveFile(src, dest);
+
+    expect(mode(path.join(tmp, "lib"))).toBe(0o777);
+    expect(mode(path.join(tmp, "lib", "Artista"))).toBe(0o777);
+    expect(mode(path.join(tmp, "lib", "Artista", "Álbum"))).toBe(0o777);
+  });
+
+  test("ensureDir não mexe na permissão de pasta que já existia", () => {
+    const existente = path.join(tmp, "biblioteca");
+    fs.mkdirSync(existente);
+    fs.chmodSync(existente, 0o750);
+
+    ensureDir(path.join(existente, "nova"));
+
+    expect(mode(existente)).toBe(0o750);          // preservada — não é nossa
+    expect(mode(path.join(existente, "nova"))).toBe(0o777);
+  });
+
+  test("chmod que falha não derruba o move", () => {
+    const src = path.join(tmp, "dl", "faixa.flac");
+    touch(src, "conteúdo");
+    const dest = path.join(tmp, "lib", "faixa.flac");
+    const realChmod = fs.chmodSync;
+    fs.chmodSync = () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); };
+
+    try {
+      expect(() => moveFile(src, dest)).not.toThrow();
+      expect(fs.readFileSync(dest, "utf8")).toBe("conteúdo");
+      expect(fs.existsSync(src)).toBe(false);
+    } finally {
+      fs.chmodSync = realChmod;
+    }
+  });
+});
