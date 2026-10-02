@@ -6,7 +6,6 @@
     'recommendations':  'Recomendações',
     'playlists':        'Playlists',
     'new-playlist':     'Nova Playlist',
-    'clusters':         'Clusters',
     'analysis-library': 'Análise de Áudio',
     'downloads':        'Downloads',
     'logs':             'Logs',

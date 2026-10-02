@@ -3,7 +3,6 @@
   import Recommendations from '../../pages/Recommendations.svelte';
   import Playlists       from '../../pages/Playlists.svelte';
   import NewPlaylist     from '../../pages/NewPlaylist.svelte';
-  import Clusters        from '../../pages/Clusters.svelte';
   import AnalysisLibrary from '../../pages/AnalysisLibrary.svelte';
   import Downloads       from '../../pages/Downloads.svelte';
   import Logs            from '../../pages/Logs.svelte';
@@ -17,7 +16,6 @@
     'recommendations':   Recommendations,
     'playlists':         Playlists,
     'new-playlist':      NewPlaylist,
-    'clusters':          Clusters,
     'analysis-library':  AnalysisLibrary,
     'downloads':         Downloads,
     'logs':              Logs,

@@ -10,7 +10,6 @@
         { page: 'dashboard',         icon: '◈',  label: 'Dashboard' },
         { page: 'recommendations',   icon: '✦',  label: 'Recomendações' },
         { page: 'rewind',            icon: '↺',  label: 'Retrospectiva' },
-        { page: 'clusters',          icon: '⬡',  label: 'Clusters' },
         { page: 'analysis-library',  icon: '⊛',  label: 'Análise de Áudio' },
       ],
     },

@@ -11,7 +11,6 @@
 
   const MORE_ITEMS = [
     { page: 'new-playlist',     icon: '+',  label: 'Nova Playlist' },
-    { page: 'clusters',         icon: '⬡',  label: 'Clusters' },
     { page: 'rewind',           icon: '↺',  label: 'Retrospectiva' },
     { page: 'analysis-library', icon: '⊛',  label: 'Análise de Áudio' },
     { page: 'logs',             icon: '⊞',  label: 'Logs' },

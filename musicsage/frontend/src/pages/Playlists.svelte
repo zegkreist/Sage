@@ -21,15 +21,45 @@
   let error          = $state('');
   let mobileView     = $state('list'); // 'list' | 'detail'
 
+  // Atualiza a lista quando playlists mudam (ex: criação em outra aba/página)
+  // e faz refresh leve ao voltar o foco da janela.
+  let lastLoadedAt = $state(0);
+
+  async function refreshIfStale() {
+    // Evita refetch se carregou há menos de 5s
+    if (Date.now() - lastLoadedAt < 5000) return;
+    lastLoadedAt = Date.now();
+    await loadPlaylists();
+    // Seleção válida: mantém; seleção órfã (deletada em outro lugar): limpa
+    if ($selectedPlaylistId && !$playlists.some(p => (p.id ?? p.ratingKey) === $selectedPlaylistId)) {
+      selectedPlaylistId.set(null);
+      detail = null;
+      if ($isMobile) mobileView = 'list';
+    }
+  }
+
   onMount(async () => {
     loading = true;
     await loadPlaylists();
+    lastLoadedAt = Date.now();
     loading = false;
 
     // auto-select first playlist only on desktop
     if ($playlists.length > 0 && !$selectedPlaylistId && !$isMobile) {
       selectPlaylist($playlists[0].id ?? $playlists[0].ratingKey);
     }
+
+    // Reage a mutações: o store é atualizado por outras páginas (Nova Playlist, etc.)
+    const unsub = playlists.subscribe(() => { lastLoadedAt = Date.now(); });
+
+    // Refresh ao voltar o foco (troca de aba/app)
+    const onFocus = () => refreshIfStale();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      unsub();
+      window.removeEventListener('focus', onFocus);
+    };
   });
 
   async function selectPlaylist(id) {

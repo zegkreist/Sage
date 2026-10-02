@@ -16,7 +16,7 @@
     { id: 'recommendations',  label: 'Recomendações',    icon: '✦', group: 'Navegação' },
     { id: 'playlists',        label: 'Minhas Playlists', icon: '≡', group: 'Navegação' },
     { id: 'new-playlist',     label: 'Nova Playlist',    icon: '+', group: 'Navegação' },
-    { id: 'clusters',         label: 'Clusters',         icon: '⬡', group: 'Navegação' },
+
     { id: 'analysis-library', label: 'Análise de Áudio', icon: '⊛', group: 'Navegação' },
     { id: 'downloads',        label: 'Downloads',        icon: '↓', group: 'Navegação' },
     { id: 'logs',             label: 'Logs',             icon: '⊞', group: 'Navegação' },
