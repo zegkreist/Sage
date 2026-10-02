@@ -14,6 +14,7 @@
  * Destino padrão: plex_server/music/Artist/Album (Year)/tracks
  */
 
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import {
@@ -63,6 +64,15 @@ export class MusicOrganizer {
 
     for (const item of fs.readdirSync(sourceDir)) {
       const itemPath = path.join(sourceDir, item);
+
+      // Faixas avulsas soltas na raiz da fonte (TideCaller sem add_singles_to_folder):
+      // vão para music/Singles/ em vez de ficarem presas para sempre.
+      if (fs.statSync(itemPath).isFile()) {
+        if (isAudioFile(itemPath)) {
+          await this._moveLooseTrack(itemPath, prefix);
+        }
+        continue;
+      }
 
       if (!fs.statSync(itemPath).isDirectory()) continue;
 
@@ -174,8 +184,38 @@ export class MusicOrganizer {
       const destFile = path.join(destDir, path.basename(audioFile));
 
       if (fs.existsSync(destFile)) {
-        if (this.verbose) console.log(`   ⏭️  ${path.basename(audioFile)}`);
-        this.stats.skipped++;
+        // Colisão: idêntico → skip (duplicata); diferente → renomear destino com sufixo
+        if (this._filesIdentical(audioFile, destFile)) {
+          if (this.verbose) console.log(`   ⏭️  ${path.basename(audioFile)}`);
+          this.stats.skipped++;
+          if (!this.dryRun) {
+            try { fs.unlinkSync(audioFile); } catch { /* ignorar */ }
+          }
+          continue;
+        }
+        const ext = path.extname(path.basename(audioFile));
+        const stem = path.basename(path.basename(audioFile), ext);
+        let n = 2;
+        let renamed = path.join(destDir, `${stem} (${n})${ext}`);
+        while (fs.existsSync(renamed)) {
+          n++;
+          renamed = path.join(destDir, `${stem} (${n})${ext}`);
+        }
+        console.log(`   ⚠️  ${path.basename(audioFile)} existe com conteúdo diferente → ${path.basename(renamed)}`);
+        if (this.dryRun) {
+          console.log(`   → ${renamed}`);
+          count++;
+          this.stats.moved++;
+          continue;
+        }
+        try {
+          moveFile(audioFile, renamed);
+          count++;
+          this.stats.moved++;
+        } catch (err) {
+          console.error(`   ✗ ${path.basename(audioFile)}: ${err.message}`);
+          this.stats.errors++;
+        }
         continue;
       }
 
@@ -214,8 +254,14 @@ export class MusicOrganizer {
         if (fs.statSync(subp).isDirectory()) this._removeLitterFiles(subp);
       }
 
-      // Remover pasta de origem (forçado — áudio já foi movido)
-      fs.rmSync(releaseDir, { recursive: true, force: true });
+      // Remover pasta de origem — APENAS se não sobrou nenhum áudio
+      // (defensivo: uma falha de move nunca pode causar perda de faixa)
+      if (this._hasAnyAudio(releaseDir)) {
+        console.error(`   ⚠️  ${path.basename(releaseDir)}: ainda contém áudio — pasta de origem preservada`);
+        this.stats.errors++;
+      } else {
+        fs.rmSync(releaseDir, { recursive: true, force: true });
+      }
     }
 
     if (count > 0) {
@@ -223,6 +269,94 @@ export class MusicOrganizer {
     }
 
     return count;
+  }
+
+  /**
+   * Move uma faixa avulsa solta na raiz da fonte para a biblioteca.
+   * Tenta extrair "Artista - Título" do nome do arquivo; sem artista,
+   * cai em music/Singles/.
+   * @private
+   */
+  async _moveLooseTrack(filePath, logPrefix = "") {
+    const base = path.basename(filePath, path.extname(filePath));
+    // Padrão comum do streamrip: "Artist - Title"
+    const m = base.match(/^(.+?)\s+-\s+(.+)$/);
+    const artist = m ? m[1].trim() : null;
+    const destDir = artist
+      ? path.join(this.destDir, sanitizeName(artist), "Singles")
+      : path.join(this.destDir, "Singles");
+
+    console.log(`${logPrefix}🎶 Faixa avulsa: ${path.basename(filePath)}`);
+
+    const moved = this._moveTrackWithCollisionCheck(filePath, destDir);
+    if (moved) {
+      this.stats.moved++;
+      if (this.verbose) console.log(`   → ${path.join(destDir, path.basename(filePath))}`);
+    } else {
+      this.stats.skipped++;
+    }
+    // Limpar a fonte se ficou vazia
+    if (!this.dryRun) {
+      const sourceDir = path.dirname(filePath);
+      try {
+        if (fs.readdirSync(sourceDir).length === 0) fs.rmdirSync(sourceDir);
+      } catch { /* ignorar */ }
+    }
+  }
+
+  /**
+   * Move um arquivo de áudio tratando colisão de basename no destino:
+   *  - conteúdo idêntico (tamanho + hash) → skip (duplicata)
+   *  - conteúdo diferente → destino renomeado com sufixo " (2)", " (3)"…
+   * @private
+   * @returns {boolean} true se movido, false se skipado como duplicata
+   */
+  _moveTrackWithCollisionCheck(srcFile, destDir) {
+    const base = path.basename(srcFile);
+    let destFile = path.join(destDir, base);
+
+    if (fs.existsSync(destFile)) {
+      if (this._filesIdentical(srcFile, destFile)) {
+        if (this.verbose) console.log(`   ⏭️  ${base} (duplicata idêntica)`);
+        // Não move, mas não deixa órfão: apagar origem é seguro (idêntico)
+        if (!this.dryRun) {
+          try { fs.unlinkSync(srcFile); } catch { /* ignorar */ }
+        }
+        return false;
+      }
+      // Conteúdo diferente: achar sufixo livre " (2)", " (3)"…
+      const ext = path.extname(base);
+      const stem = path.basename(base, ext);
+      let n = 2;
+      destFile = path.join(destDir, `${stem} (${n})${ext}`);
+      while (fs.existsSync(destFile)) {
+        n++;
+        destFile = path.join(destDir, `${stem} (${n})${ext}`);
+      }
+      console.log(`   ⚠️  colisão de nome, conteúdo diferente → ${path.basename(destFile)}`);
+    }
+
+    if (this.dryRun) return true;
+
+    moveFile(srcFile, destFile);
+    return true;
+  }
+
+  /**
+   * Compara dois arquivos: tamanho + hash SHA-1 (rápido para faixas de música).
+   * @private
+   */
+  _filesIdentical(a, b) {
+    try {
+      const sa = fs.statSync(a);
+      const sb = fs.statSync(b);
+      if (sa.size !== sb.size) return false;
+      const ha = crypto.createHash("sha1").update(fs.readFileSync(a)).digest("hex");
+      const hb = crypto.createHash("sha1").update(fs.readFileSync(b)).digest("hex");
+      return ha === hb;
+    } catch {
+      return false;
+    }
   }
 
   /**
