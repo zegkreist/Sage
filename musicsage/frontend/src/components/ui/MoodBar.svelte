@@ -11,7 +11,7 @@
 
 <div class="flex items-center gap-3 {cls}">
   <span class="text-xs w-24 shrink-0 truncate" style="color:#5a5a78">{label}</span>
-  <div class="flex-1 h-1 rounded-full overflow-hidden" style="background:#1c1c28">
+  <div class="flex-1 h-1 rounded-full overflow-hidden" style="background:var(--surface3)">
     <div
       class="h-full rounded-full transition-all duration-700"
       style="width:{pct}%; background:{color}; box-shadow: 0 0 6px {color}66"

@@ -122,18 +122,18 @@
   </div>
 
   <!-- Tab switcher -->
-  <div class="flex gap-1 p-1 rounded-xl w-fit" style="background:#0a0a0f;border:1px solid #1e1e2e">
+  <div class="flex gap-1 p-1 rounded-xl w-fit" style="background:var(--bg);border:1px solid #1e1e2e">
     <button
       class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
       style={activeTab === 'prompt'
-        ? 'background:rgba(124,106,245,0.18);color:#9d8eff;border:1px solid rgba(124,106,245,0.25)'
+        ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.25)'
         : 'color:#5a5a78;border:1px solid transparent'}
       onclick={() => activeTab = 'prompt'}
     >Por Prompt</button>
     <button
       class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
       style={activeTab === 'track'
-        ? 'background:rgba(124,106,245,0.18);color:#9d8eff;border:1px solid rgba(124,106,245,0.25)'
+        ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.25)'
         : 'color:#5a5a78;border:1px solid transparent'}
       onclick={() => activeTab = 'track'}
     >Por Música</button>
@@ -142,7 +142,7 @@
   <!-- ── Por Prompt ──────────────────────────────────────── -->
   {#if activeTab === 'prompt'}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-      <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">Gerar por Prompt</div>
       </div>
       <div class="px-5 py-4 space-y-4">
@@ -155,7 +155,7 @@
             placeholder="Ex: músicas calmas para trabalhar, rock alternativo dos anos 90…"
             class="w-full rounded-lg px-3 py-2 text-sm text-white resize-none focus:outline-none
                    placeholder:text-[#5a5a78]"
-            style="background:#16161f;border:1px solid #1e1e2e"
+            style="background:var(--surface2);border:1px solid #1e1e2e"
             onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
             onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
           ></textarea>
@@ -166,7 +166,7 @@
             <label for="prompt-size" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Nº de músicas</label>
             <input id="prompt-size" type="number" bind:value={promptSize} min="5" max="200"
               class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'} />
           </div>
@@ -174,7 +174,7 @@
             <label for="max-per-artist" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Máx. faixas por artista</label>
             <input id="max-per-artist" type="number" bind:value={maxPerArtist} min="1" max="20"
               class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'} />
           </div>
@@ -182,34 +182,34 @@
             <label for="discovery-ratio" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Taxa de descoberta (0–1)</label>
             <input id="discovery-ratio" type="number" bind:value={discoveryRatio} min="0" max="1" step="0.05"
               class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'} />
           </div>
         </div>
 
         <div class="flex flex-wrap gap-x-5 gap-y-2">
-          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
-            <input type="checkbox" bind:checked={useRandom} class="accent-[#7c6af5]" />
+          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:var(--dim)">
+            <input type="checkbox" bind:checked={useRandom} class="accent-[var(--accent)]" />
             Ordem aleatória
           </label>
-          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
-            <input type="checkbox" bind:checked={useCache} class="accent-[#7c6af5]" />
+          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:var(--dim)">
+            <input type="checkbox" bind:checked={useCache} class="accent-[var(--accent)]" />
             Usar análise de áudio
           </label>
           <!-- O filtro roda sobre o cache de análise — sem ele o endpoint nem recebe as chaves -->
           <label
             class="flex items-center gap-2 text-sm select-none {useCache ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}"
-            style="color:#8888a8"
+            style="color:var(--dim)"
             title={useCache ? 'Gera usando apenas faixas favoritadas' : 'Requer "Usar análise de áudio"'}
           >
-            <input type="checkbox" bind:checked={onlyFavorites} disabled={!useCache} class="accent-[#7c6af5]" />
+            <input type="checkbox" bind:checked={onlyFavorites} disabled={!useCache} class="accent-[var(--accent)]" />
             ♥ Só favoritos
           </label>
         </div>
 
         {#if promptError}
-          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
             {promptError}<button class="ml-2 opacity-60" onclick={() => promptError = ''}>✕</button>
           </div>
         {/if}
@@ -220,11 +220,11 @@
 
         {#if generating}
           <div class="mt-2">
-            <div class="flex justify-between text-2xs mb-1" style="color:#9d8eff">
+            <div class="flex justify-between text-2xs mb-1" style="color:var(--accent-hi)">
               <span>{genStage}</span><span>{genPct}%</span>
             </div>
-            <div class="h-1.5 rounded-full overflow-hidden" style="background:#1a1a28">
-              <div class="h-full rounded-full transition-all duration-500" style="width:{genPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background:var(--border)">
+              <div class="h-full rounded-full transition-all duration-500" style="width:{genPct}%;background:linear-gradient(90deg,var(--accent),var(--accent-hi))"></div>
             </div>
           </div>
         {/if}
@@ -234,7 +234,7 @@
             <div class="text-sm font-semibold" style="color:#1db954">
               "{promptResult.title ?? promptResult.name}" criada com {promptResult.trackCount ?? promptResult.tracks?.length ?? '?'} faixas
             </div>
-            <button class="text-2xs underline mt-1" style="color:#9d8eff" onclick={() => navigate('playlists')}>Ver playlists →</button>
+            <button class="text-2xs underline mt-1" style="color:var(--accent-hi)" onclick={() => navigate('playlists')}>Ver playlists →</button>
           </div>
         {/if}
       </div>
@@ -244,7 +244,7 @@
   <!-- ── Por Música ──────────────────────────────────────── -->
   {#if activeTab === 'track'}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-      <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">Playlist Radio (por similaridade)</div>
       </div>
       <div class="px-5 py-4 space-y-4">
@@ -259,7 +259,7 @@
               placeholder="Buscar faixa…"
               class="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none
                      placeholder:text-[#5a5a78]"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
               oninput={() => { selectedTrack = null; }}
@@ -271,7 +271,7 @@
 
           {#if trackResults.length > 0}
             <div class="absolute z-10 w-full mt-1 rounded-xl border shadow-xl overflow-hidden max-h-48 overflow-y-auto"
-                 style="background:#1c1c28;border-color:#2e2e4a">
+                 style="background:var(--surface3);border-color:var(--border-hi)">
               {#each trackResults as t}
                 <button
                   class="list-row w-full text-left px-3 py-2 transition-colors"
@@ -287,7 +287,7 @@
 
         {#if selectedTrack}
           <div class="rounded-xl px-3 py-2 border text-sm" style="background:rgba(124,106,245,0.08);border-color:rgba(124,106,245,0.2)">
-            <span style="color:#9d8eff">Âncora:</span>
+            <span style="color:var(--accent-hi)">Âncora:</span>
             <span class="text-white ml-1">{selectedTrack.title}</span>
             <span class="ml-1" style="color:#5a5a78">— {selectedTrack.artist}</span>
           </div>
@@ -298,7 +298,7 @@
             <label for="track-limit" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Tamanho da playlist</label>
             <input id="track-limit" type="number" bind:value={trackLimit} min="5" max="100"
               class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'} />
           </div>
@@ -306,31 +306,32 @@
             <label for="track-max-per-artist" class="block text-2xs font-medium mb-1.5" style="color:#5a5a78">Máx. faixas por artista</label>
             <input id="track-max-per-artist" type="number" bind:value={trackMaxPerArtist} min="1" max="20"
               class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-              style="background:#16161f;border:1px solid #1e1e2e"
+              style="background:var(--surface2);border:1px solid #1e1e2e"
               onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
               onblur={e => e.currentTarget.style.borderColor='#1e1e2e'} />
           </div>
           <div class="col-span-2">
             <label for="track-discovery" class="flex items-center justify-between text-2xs font-medium mb-1.5">
               <span style="color:#5a5a78">Taxa de descoberta</span>
-              <span class="font-semibold" style="color:#7c6af5">{Math.round(trackDiscovery * 100)}%</span>
+              <span class="font-semibold" style="color:var(--accent)">{Math.round(trackDiscovery * 100)}%</span>
             </label>
             <input id="track-discovery" type="range" bind:value={trackDiscovery} min="0" max="1" step="0.05"
-              class="w-full accent-[#7c6af5] h-1.5 rounded-full cursor-pointer"
-              style="background:linear-gradient(to right, #7c6af5 {trackDiscovery*100}%, #1e1e2e {trackDiscovery*100}%)" />
-            <div class="flex justify-between text-2xs mt-1" style="color:#3a3a58">
+              class="w-full accent-[var(--accent)] h-1.5 rounded-full cursor-pointer"
+              style="background:linear-gradient(to right, var(--accent) {trackDiscovery*100}%, #1e1e2e {trackDiscovery*100}%)" />
+            <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
+            <div class="flex justify-between text-2xs mt-1" style="color:var(--muted)">
               <span>0% — só similares</span>
               <span>50% — mix</span>
               <span>100% — só novas</span>
             </div>
             <p class="text-2xs mt-1.5" style="color:#5a5a78">
-              Mínimo <strong style="color:#7c6af5">{Math.round(trackDiscovery * 100)}%</strong> das faixas virão do pool de músicas menos ouvidas
+              Mínimo <strong style="color:var(--accent)">{Math.round(trackDiscovery * 100)}%</strong> das faixas virão do pool de músicas menos ouvidas
             </p>
           </div>
         </div>
 
         {#if trackError}
-          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
             {trackError}<button class="ml-2 opacity-60" onclick={() => trackError = ''}>✕</button>
           </div>
         {/if}
@@ -341,11 +342,11 @@
 
         {#if genTrack}
           <div class="mt-2">
-            <div class="flex justify-between text-2xs mb-1" style="color:#9d8eff">
+            <div class="flex justify-between text-2xs mb-1" style="color:var(--accent-hi)">
               <span>{trackStage}</span><span>{trackPct}%</span>
             </div>
-            <div class="h-1.5 rounded-full overflow-hidden" style="background:#1a1a28">
-              <div class="h-full rounded-full transition-all duration-500" style="width:{trackPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+            <div class="h-1.5 rounded-full overflow-hidden" style="background:var(--border)">
+              <div class="h-full rounded-full transition-all duration-500" style="width:{trackPct}%;background:linear-gradient(90deg,var(--accent),var(--accent-hi))"></div>
             </div>
           </div>
         {/if}
@@ -355,7 +356,7 @@
             <div class="text-sm font-semibold" style="color:#1db954">
               "{trackResult.title ?? trackResult.name}" criada com {trackResult.trackCount ?? trackResult.tracks?.length ?? '?'} faixas
             </div>
-            <button class="text-2xs underline mt-1" style="color:#9d8eff" onclick={() => navigate('playlists')}>Ver playlists →</button>
+            <button class="text-2xs underline mt-1" style="color:var(--accent-hi)" onclick={() => navigate('playlists')}>Ver playlists →</button>
           </div>
         {/if}
       </div>

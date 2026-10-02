@@ -30,7 +30,7 @@
   <div class="flex-1 min-w-0">
     <div class="text-sm font-medium text-white truncate">{title || '—'}</div>
     {#if subtitle}
-      <div class="text-2xs truncate" style="color:#8888a8">{subtitle}</div>
+      <div class="text-2xs truncate" style="color:var(--dim)">{subtitle}</div>
     {/if}
   </div>
 

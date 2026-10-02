@@ -70,3 +70,46 @@ export function pollJob(jobId, onProgress = null, { intervalMs = 1500, timeoutMs
     tick();
   });
 }
+
+/**
+ * Faz polling de um endpoint de progresso em batch (ex.: '/audio/batch-progress')
+ * até `running` ficar falsy ou a requisição falhar.
+ * @param {string} path — endpoint de progresso (GET)
+ * @param {(data: *) => void} setState — chamado a cada resposta com o payload
+ * @param {{intervalMs?: number, onDone?: (data: *) => void|Promise<void>, onError?: (err: Error) => void}} [opts]
+ * @returns {() => void} função stop() para cancelar o polling
+ */
+export function pollProgress(path, setState, { intervalMs = 2000, onDone = null, onError = null } = {}) {
+  let pollId = null;
+  let stopped = false;
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      const data = await api('GET', path);
+      if (stopped) return;
+      setState(data);
+      if (!data?.running) {
+        stop();
+        await onDone?.(data);
+      }
+    } catch (e) {
+      stop();
+      onError?.(e);
+    }
+  }
+
+  function start() {
+    if (pollId || stopped) return;
+    pollId = setInterval(tick, intervalMs);
+  }
+
+  function stop() {
+    stopped = true;
+    if (pollId) clearInterval(pollId);
+    pollId = null;
+  }
+
+  start();
+  return stop;
+}

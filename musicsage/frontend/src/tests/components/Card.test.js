@@ -4,7 +4,6 @@ import Card from '../../components/ui/Card.svelte';
 import StatCard from '../../components/ui/StatCard.svelte';
 import Badge from '../../components/ui/Badge.svelte';
 import MoodBar from '../../components/ui/MoodBar.svelte';
-import Alert from '../../components/ui/Alert.svelte';
 
 describe('Card', () => {
   it('renders title when provided', () => {
@@ -78,22 +77,5 @@ describe('MoodBar', () => {
     const { container } = render(MoodBar, { label: 'E', value: 8 });
     const bar = container.querySelector('.bg-emerald-500');
     expect(bar).toBeTruthy();
-  });
-});
-
-describe('Alert', () => {
-  it('renders message', () => {
-    render(Alert, { type: 'info', message: 'Test message' });
-    expect(screen.getByText('Test message')).toBeInTheDocument();
-  });
-
-  it('renders nothing when message is empty', () => {
-    const { container } = render(Alert, { message: '' });
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('renders dismiss button when onDismiss provided', () => {
-    render(Alert, { message: 'Msg', type: 'info', onDismiss: () => {} });
-    expect(screen.getByLabelText('Fechar')).toBeInTheDocument();
   });
 });

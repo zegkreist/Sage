@@ -37,7 +37,7 @@
 <button
   {type} {title}
   class="{base} {variants[variant] ?? variants.primary} {sizes[size] ?? sizes.md} {cls}"
-  style={variant === 'secondary' ? 'background: #16161f;' : ''}
+  style={variant === 'secondary' ? 'background: var(--surface2);' : ''}
   disabled={disabled || loading}
   {onclick}
 >

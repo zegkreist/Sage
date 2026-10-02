@@ -26,13 +26,21 @@ export function navigateToDownload(tab, artist) {
   navigate('downloads');
 }
 
+/**
+ * Extracts the page key from a raw hash, stripping any query string.
+ *   "#/rewind?period=year&userId=3" → "rewind"
+ */
+function pageFromHash(raw) {
+  return (raw ?? '').split('?')[0].replace(/^\//, '');
+}
+
 // Bootstrap from hash on initial load
 if (typeof window !== 'undefined') {
-  const initial = window.location.hash.slice(1);
+  const initial = pageFromHash(window.location.hash.slice(1));
   if (initial) currentPage.set(initial);
 
   window.addEventListener('hashchange', () => {
-    const h = window.location.hash.slice(1);
+    const h = pageFromHash(window.location.hash.slice(1));
     if (h) currentPage.set(h);
   });
 }

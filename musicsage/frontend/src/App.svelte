@@ -7,20 +7,14 @@
   import MobileHeader from './components/layout/MobileHeader.svelte';
   import BottomNav from './components/layout/BottomNav.svelte';
   import ToastContainer from './components/ui/ToastContainer.svelte';
-
-  // Pages (lazy imports for code splitting)
-  import Dashboard       from './pages/Dashboard.svelte';
-  import Recommendations from './pages/Recommendations.svelte';
-  import Playlists       from './pages/Playlists.svelte';
-  import NewPlaylist     from './pages/NewPlaylist.svelte';
-  import Clusters        from './pages/Clusters.svelte';
-  import AnalysisLibrary from './pages/AnalysisLibrary.svelte';
-  import Downloads       from './pages/Downloads.svelte';
-  import Logs            from './pages/Logs.svelte';
-  import PlexStatus      from './pages/PlexStatus.svelte';
+  import RouteOutlet from './components/layout/RouteOutlet.svelte';
+  import CommandPalette from './components/ui/CommandPalette.svelte';
+  import { startDownloadsPoller } from '$lib/stores/downloads.js';
 
   // Favoritos são lidos por várias páginas — carrega uma vez no boot
   onMount(loadFavorites);
+  // Poller global de downloads — emite toasts quando terminam/falham
+  onMount(startDownloadsPoller);
 </script>
 
 {#if $isMobile}
@@ -33,31 +27,12 @@
       id="main-content"
       style="padding-bottom: var(--mobile-nav-h);"
     >
-      {#if $currentPage === 'dashboard'}
-        <Dashboard />
-      {:else if $currentPage === 'recommendations'}
-        <Recommendations />
-      {:else if $currentPage === 'playlists'}
-        <Playlists />
-      {:else if $currentPage === 'new-playlist'}
-        <NewPlaylist />
-      {:else if $currentPage === 'clusters'}
-        <Clusters />
-      {:else if $currentPage === 'analysis-library'}
-        <AnalysisLibrary />
-      {:else if $currentPage === 'downloads'}
-        <Downloads />
-      {:else if $currentPage === 'logs'}
-        <Logs />
-      {:else if $currentPage === 'plex-status'}
-        <PlexStatus />
-      {:else}
-        <Dashboard />
-      {/if}
+      <RouteOutlet page={$currentPage} />
     </main>
 
     <BottomNav />
     <ToastContainer />
+    <CommandPalette />
   </div>
 
 {:else}
@@ -66,29 +41,10 @@
     <Sidebar />
 
     <main class="flex-1 overflow-y-auto" id="main-content">
-      {#if $currentPage === 'dashboard'}
-        <Dashboard />
-      {:else if $currentPage === 'recommendations'}
-        <Recommendations />
-      {:else if $currentPage === 'playlists'}
-        <Playlists />
-      {:else if $currentPage === 'new-playlist'}
-        <NewPlaylist />
-      {:else if $currentPage === 'clusters'}
-        <Clusters />
-      {:else if $currentPage === 'analysis-library'}
-        <AnalysisLibrary />
-      {:else if $currentPage === 'downloads'}
-        <Downloads />
-      {:else if $currentPage === 'logs'}
-        <Logs />
-      {:else if $currentPage === 'plex-status'}
-        <PlexStatus />
-      {:else}
-        <Dashboard />
-      {/if}
+      <RouteOutlet page={$currentPage} />
     </main>
 
     <ToastContainer />
+    <CommandPalette />
   </div>
 {/if}

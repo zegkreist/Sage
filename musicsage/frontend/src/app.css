@@ -12,8 +12,18 @@
   --radius-sm:        8px;
   --radius-xs:        6px;
   --transition:       150ms ease;
+  --surface2:         #16161f;
+  --surface3:         #1c1c28;
+  --border:           #1e1e2e;
+  --border-hi:        #2e2e4a;
   --accent:           #7c6af5;
   --accent-hi:        #9d8eff;
+  --dim:              #8888a8;
+  --muted:            #5a5a78;
+  --warn:             #f59e0b;
+  --danger:           #ef4444;
+  --info:             #38bdf8;
+  --bg:               #0a0a0f;
 }
 
 /* ─── Base reset ──────────────────────────────────────── */
@@ -22,7 +32,7 @@
 html, body {
   height: 100%;
   margin: 0;
-  background: #0a0a0f;
+  background: var(--bg);
   color: #d4d4e8;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-size: 14px;
@@ -52,7 +62,7 @@ html, body {
 
 /* ─── Typography helpers ──────────────────────────────── */
 .text-gradient {
-  background: linear-gradient(135deg, #9d8eff 0%, #7c6af5 50%, #c084fc 100%);
+  background: linear-gradient(135deg, var(--accent-hi) 0%, var(--accent) 50%, var(--accent-hi) /* TODO: era #c084fc (violeta rosado), mapeado para accent-hi */ 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -102,7 +112,7 @@ html, body {
 .progress-bar {
   height: 3px;
   border-radius: 2px;
-  background: #1c1c28;
+  background: var(--surface3);
   overflow: hidden;
 }
 .progress-fill {
@@ -136,7 +146,7 @@ html, body {
   justify-content: center;
   font-size: 10px;
   font-weight: 700;
-  background: #1c1c28;
+  background: var(--surface3);
   color: #5a5a78;
   flex-shrink: 0;
 }

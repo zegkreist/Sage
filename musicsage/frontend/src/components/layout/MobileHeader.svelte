@@ -19,7 +19,7 @@
   style="
     height: var(--mobile-header-h);
     background: #0e0e15;
-    border-bottom: 1px solid #1a1a28;
+    border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 50;

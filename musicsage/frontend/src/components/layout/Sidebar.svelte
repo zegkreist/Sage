@@ -1,6 +1,7 @@
 <script>
   import { currentPage, navigate } from '$lib/stores/router.js';
   import { onMount } from 'svelte';
+  import { get } from '$lib/api.js';
 
   const navGroups = [
     {
@@ -8,6 +9,7 @@
       items: [
         { page: 'dashboard',         icon: '◈',  label: 'Dashboard' },
         { page: 'recommendations',   icon: '✦',  label: 'Recomendações' },
+        { page: 'rewind',            icon: '↺',  label: 'Retrospectiva' },
         { page: 'clusters',          icon: '⬡',  label: 'Clusters' },
         { page: 'analysis-library',  icon: '⊛',  label: 'Análise de Áudio' },
       ],
@@ -33,8 +35,8 @@
 
   async function checkHealth() {
     try {
-      const res = await fetch('/api/health');
-      health = res.ok ? 'ok' : 'error';
+      await get('/health');
+      health = 'ok';
     } catch {
       health = 'error';
     }
@@ -49,7 +51,7 @@
 
 <nav
   class="flex flex-col h-full shrink-0 overflow-y-auto hide-scrollbar"
-  style="width: var(--sidebar-w); background: #0e0e15; border-right: 1px solid #1a1a28;"
+  style="width: var(--sidebar-w); background: #0e0e15; border-right: 1px solid var(--border);"
   aria-label="Navegação principal"
 >
   <!-- Logo / Brand -->
@@ -69,7 +71,8 @@
   <div class="flex-1 px-3 pb-4 space-y-5">
     {#each navGroups as group}
       <div>
-        <div class="px-3 mb-1 text-2xs font-semibold uppercase tracking-widest" style="color:#3a3a58">
+        <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
+        <div class="px-3 mb-1 text-2xs font-semibold uppercase tracking-widest" style="color:var(--muted)">
           {group.label}
         </div>
         <div class="space-y-px">
@@ -98,13 +101,13 @@
   </div>
 
   <!-- Footer: health -->
-  <div class="px-5 py-4 shrink-0" style="border-top: 1px solid #1a1a28;">
+  <div class="px-5 py-4 shrink-0" style="border-top: 1px solid var(--border);">
     <div class="flex items-center gap-2.5">
       <span
         class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors
                {health === 'ok' ? 'bg-positive' : health === 'error' ? 'bg-danger' : 'bg-warn'}"
       ></span>
-      <span class="text-2xs font-medium" style="color:#3a3a58">
+      <span class="text-2xs font-medium" style="color:var(--muted)">
         {health === 'ok' ? 'Servidor online' : health === 'error' ? 'Offline' : 'Verificando…'}
       </span>
     </div>

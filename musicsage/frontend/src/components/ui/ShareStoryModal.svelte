@@ -502,13 +502,13 @@
         >✕</button>
       </div>
 
-      <div class="flex gap-1" style="background:#1a1a28;border-radius:14px;padding:4px">
+      <div class="flex gap-1" style="background:var(--border);border-radius:14px;padding:4px">
         {#each [['artists','Top Artistas'],['tracks','Top Faixas'],['curiosidades','Curiosidades']] as [t, label]}
           <button
             onclick={() => { tab = t; clearTimeout(renderTimer); renderTimer = setTimeout(() => scheduleRender(t), 0); }}
             style="padding:7px 14px;border-radius:10px;font-size:12px;font-weight:700;border:none;cursor:pointer;
                    transition:all .15s;white-space:nowrap;
-                   background:{tab === t ? '#7c6af5' : 'transparent'};
+                   background:{tab === t ? 'var(--accent)' : 'transparent'};
                    color:{tab === t ? '#fff' : '#5a5a78'}"
           >{label}</button>
         {/each}
@@ -530,17 +530,18 @@
         >↓ Baixar PNG</button>
         <button
           onclick={() => (show = false)}
-          style="padding:11px 18px;border-radius:13px;background:#1e1e2e;color:#8888aa;font-size:14px;border:none;cursor:pointer"
+          style="padding:11px 18px;border-radius:13px;background:#1e1e2e;color:var(--dim);font-size:14px;border:none;cursor:pointer"
         >Fechar</button>
       </div>
 
       {#if downloadHint}
-        <div style="font-size:12px;color:#f59e0b;padding:4px 12px;background:rgba(245,158,11,0.1);border-radius:10px;border:1px solid rgba(245,158,11,0.2);text-align:center">
+        <div style="font-size:12px;color:var(--warn);padding:4px 12px;background:rgba(245,158,11,0.1);border-radius:10px;border:1px solid rgba(245,158,11,0.2);text-align:center">
           {downloadHint}
         </div>
       {/if}
 
-      <div style="font-size:11px;color:#3a3a58;padding-bottom:4px;text-align:center">
+      <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
+      <div style="font-size:11px;color:var(--muted);padding-bottom:4px;text-align:center">
         Salve o PNG e publique nos Stories do Instagram (9:16)
       </div>
 

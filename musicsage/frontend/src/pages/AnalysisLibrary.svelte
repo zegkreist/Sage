@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { api } from '$lib/api.js';
+  import { api, pollProgress } from '$lib/api.js';
   import { toast } from '$lib/stores/toast.js';
 
   import Button      from '../components/ui/Button.svelte';
@@ -11,7 +11,7 @@
   let cacheStats  = $state(null);
   let progress    = $state(null);   // { processed, total, current, running }
   let recent      = $state([]);
-  let pollId      = $state(null);
+  let stopAudioPoll = null;
 
   // Batch options
   let maxSecs     = $state(60);
@@ -56,27 +56,26 @@
   async function loadProgress() {
     try {
       progress = await api('GET', '/audio/batch-progress');
-      if (progress?.running && !pollId) startPolling();
+      if (progress?.running && !stopAudioPoll) startPolling();
     } catch { /* non-critical */ }
   }
 
   function startPolling() {
-    if (pollId) return;
-    pollId = setInterval(async () => {
-      try {
-        progress = await api('GET', '/audio/batch-progress');
-        if (!progress?.running) {
-          stopPolling();
+    if (stopAudioPoll) return;
+    stopAudioPoll = pollProgress('/audio/batch-progress',
+      (data) => { progress = data; },
+      {
+        onDone: async () => {
           await loadCacheStats();
           toast.success('Análise concluída!');
-        }
-      } catch { stopPolling(); }
-    }, 2000);
+        },
+      }
+    );
   }
 
   function stopPolling() {
-    clearInterval(pollId);
-    pollId = null;
+    stopAudioPoll?.();
+    stopAudioPoll = null;
   }
 
   async function startBatch() {
@@ -141,7 +140,7 @@
   let lyricsProgress   = $state(null);   // { running, processed, total, pct, done, notFound, failed, skipped, current }
   let loadingLyrics    = $state(false);
   let lyricsOverwrite  = $state(false);
-  let lyricsPollId     = $state(null);
+  let stopLyricsPoll   = null;
   let lyricsErr        = $state('');
 
   async function loadLyricsStats() {
@@ -155,27 +154,26 @@
   async function loadLyricsProgress() {
     try {
       lyricsProgress = await api('GET', '/lyrics/batch-progress');
-      if (lyricsProgress?.running && !lyricsPollId) startLyricsPolling();
+      if (lyricsProgress?.running && !stopLyricsPoll) startLyricsPolling();
     } catch { /* não crítico */ }
   }
 
   function startLyricsPolling() {
-    if (lyricsPollId) return;
-    lyricsPollId = setInterval(async () => {
-      try {
-        lyricsProgress = await api('GET', '/lyrics/batch-progress');
-        if (!lyricsProgress?.running) {
-          stopLyricsPolling();
+    if (stopLyricsPoll) return;
+    stopLyricsPoll = pollProgress('/lyrics/batch-progress',
+      (data) => { lyricsProgress = data; },
+      {
+        onDone: async () => {
           await loadLyricsStats();
           toast.success('Letras concluídas!');
-        }
-      } catch { stopLyricsPolling(); }
-    }, 2000);
+        },
+      }
+    );
   }
 
   function stopLyricsPolling() {
-    clearInterval(lyricsPollId);
-    lyricsPollId = null;
+    stopLyricsPoll?.();
+    stopLyricsPoll = null;
   }
 
   async function startLyricsBatch() {
@@ -211,7 +209,7 @@
   </div>
 
   {#if errorMsg}
-    <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+    <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
       {errorMsg}<button class="ml-2 opacity-60" onclick={() => errorMsg = ''}>✕</button>
     </div>
   {/if}
@@ -228,7 +226,7 @@
 
   <!-- Batch controls -->
   <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+    <div class="px-5 py-4 border-b" style="border-color:var(--border)">
       <div class="text-sm font-semibold text-white">Análise de Áudio em Lote</div>
     </div>
     <div class="px-5 py-4 space-y-4">
@@ -244,14 +242,14 @@
             type="number" bind:value={maxSecs} min="5" max="300"
             disabled={running}
             class="w-full rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none transition-colors disabled:opacity-40"
-            style="background:#16161f;border:1px solid #1e1e2e"
+            style="background:var(--surface2);border:1px solid #1e1e2e"
             onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
             onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
           />
         </div>
         <div class="flex items-end pb-1">
-          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
-            <input type="checkbox" bind:checked={skipExisting} disabled={running} class="accent-[#7c6af5]" />
+          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:var(--dim)">
+            <input type="checkbox" bind:checked={skipExisting} disabled={running} class="accent-[var(--accent)]" />
             Pular faixas já analisadas
           </label>
         </div>
@@ -268,7 +266,7 @@
             <span class="text-2xs stat-value" style="color:#5a5a78">{progress.processed ?? 0} / {progress.total ?? '?'} · {pct}%</span>
           </div>
           <div class="progress-bar">
-            <div class="progress-fill" style="width:{pct}%;{running ? '' : 'background:#2e2e4a'}"></div>
+            <div class="progress-fill" style="width:{pct}%;{running ? '' : 'background:var(--border-hi)'}"></div>
           </div>
         </div>
       {/if}
@@ -291,13 +289,13 @@
 
   <!-- Reanalisar artista -->
   <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+    <div class="px-5 py-4 border-b" style="border-color:var(--border)">
       <div class="text-sm font-semibold text-white">Reanalisar Artista</div>
       <p class="text-2xs mt-0.5" style="color:#5a5a78">Limpa as análises anteriores desse artista e refaz todas as faixas</p>
     </div>
     <div class="px-5 py-4 space-y-3">
       {#if reanalyzeErr}
-        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
           {reanalyzeErr}<button class="ml-2 opacity-60" onclick={() => reanalyzeErr = ''}>✕</button>
         </div>
       {/if}
@@ -314,7 +312,7 @@
           placeholder="Nome do artista…"
           disabled={running}
           class="flex-1 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none transition-colors disabled:opacity-40"
-          style="background:#16161f;border:1px solid #1e1e2e"
+          style="background:var(--surface2);border:1px solid #1e1e2e"
           onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
           onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
           onkeydown={e => e.key === 'Enter' && !running && reanalyzeByArtist()}
@@ -328,14 +326,14 @@
 
   <!-- Letras locais -->
   <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+    <div class="px-5 py-4 border-b" style="border-color:var(--border)">
       <div class="text-sm font-semibold text-white">Letras Locais (LRC)</div>
       <p class="text-2xs mt-0.5" style="color:#5a5a78">Baixa letras via LRCLIB e salva junto aos arquivos de áudio para o Plex exibir</p>
     </div>
     <div class="px-5 py-4 space-y-4">
 
       {#if lyricsErr}
-        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+        <div class="rounded-lg px-3 py-2 text-xs border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
           {lyricsErr}<button class="ml-2 opacity-60" onclick={() => lyricsErr = ''}>✕</button>
         </div>
       {/if}
@@ -343,15 +341,15 @@
       <!-- Stats -->
       {#if lyricsStats}
         <div class="grid grid-cols-3 gap-3">
-          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
-            <div class="stat-value text-lg font-bold" style="color:#7c6af5">{lyricsStats.withLyrics}</div>
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:var(--surface2);border:1px solid #1e1e2e">
+            <div class="stat-value text-lg font-bold" style="color:var(--accent)">{lyricsStats.withLyrics}</div>
             <div class="text-2xs mt-0.5" style="color:#5a5a78">Com letras</div>
           </div>
-          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:var(--surface2);border:1px solid #1e1e2e">
             <div class="stat-value text-lg font-bold text-white">{lyricsStats.withoutLyrics}</div>
             <div class="text-2xs mt-0.5" style="color:#5a5a78">Sem letras</div>
           </div>
-          <div class="rounded-xl px-3 py-2.5 text-center" style="background:#16161f;border:1px solid #1e1e2e">
+          <div class="rounded-xl px-3 py-2.5 text-center" style="background:var(--surface2);border:1px solid #1e1e2e">
             <div class="stat-value text-lg font-bold" style="color:#1db954">
               {lyricsStats.total > 0 ? ((lyricsStats.withLyrics / lyricsStats.total) * 100).toFixed(1) : '0.0'}%
             </div>
@@ -362,8 +360,8 @@
 
       <!-- Opções -->
       <div class="flex items-center">
-        <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:#8888a8">
-          <input type="checkbox" bind:checked={lyricsOverwrite} disabled={lyricsRunning} class="accent-[#7c6af5]" />
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none" style="color:var(--dim)">
+          <input type="checkbox" bind:checked={lyricsOverwrite} disabled={lyricsRunning} class="accent-[var(--accent)]" />
           Sobrescrever letras existentes
         </label>
       </div>
@@ -381,14 +379,14 @@
             </span>
           </div>
           <div class="progress-bar">
-            <div class="progress-fill" style="width:{lyricsPct}%;{lyricsRunning ? '' : 'background:#2e2e4a'}"></div>
+            <div class="progress-fill" style="width:{lyricsPct}%;{lyricsRunning ? '' : 'background:var(--border-hi)'}"></div>
           </div>
           {#if !lyricsRunning && lyricsProgress.total > 0}
             <div class="flex gap-3 mt-2 text-2xs" style="color:#5a5a78">
               <span style="color:#1db954">✓ {lyricsProgress.done} salvas</span>
               <span>⊘ {lyricsProgress.notFound} não encontradas</span>
               <span>↷ {lyricsProgress.skipped} puladas</span>
-              {#if lyricsProgress.failed > 0}<span style="color:#ef4444">✕ {lyricsProgress.failed} falhas</span>{/if}
+              {#if lyricsProgress.failed > 0}<span style="color:var(--danger)">✕ {lyricsProgress.failed} falhas</span>{/if}
             </div>
           {/if}
         </div>
@@ -413,7 +411,7 @@
   <!-- Recently analyzed -->
   {#if recent.length > 0}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-      <div class="px-5 py-4 border-b flex items-center justify-between" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b flex items-center justify-between" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">Analisadas Recentemente</div>
         <span class="text-2xs" style="color:#5a5a78">{recent.length} faixas</span>
       </div>
@@ -427,13 +425,13 @@
             {#if t.mood || t.energy != null}
               <div class="flex gap-1.5 shrink-0">
                 {#if t.mood}
-                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(124,106,245,0.1);color:#9d8eff">{t.mood}</span>
+                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(124,106,245,0.1);color:var(--accent-hi)">{t.mood}</span>
                 {/if}
                 {#if t.energy != null}
-                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:#38bdf8">⚡ {(+t.energy).toFixed(1)}</span>
+                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:var(--info)">⚡ {(+t.energy).toFixed(1)}</span>
                 {/if}
                 {#if t.bpm}
-                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(88,88,120,0.15);color:#8888a8">♩{Math.round(t.bpm)}</span>
+                  <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(88,88,120,0.15);color:var(--dim)">♩{Math.round(t.bpm)}</span>
                 {/if}
               </div>
             {/if}

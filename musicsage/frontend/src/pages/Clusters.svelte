@@ -128,7 +128,7 @@
   </div>
 
   {#if errorMsg}
-    <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+    <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
       {errorMsg}<button class="ml-2 opacity-60" onclick={() => errorMsg = ''}>✕</button>
     </div>
   {/if}
@@ -136,7 +136,7 @@
   {#if !clusterData && !computing}
     <div class="flex flex-col items-center justify-center py-24 text-center gap-4">
       <div class="text-4xl" style="opacity:0.15">⊛</div>
-      <div class="text-base font-semibold" style="color:#8888a8">Nenhum cluster calculado</div>
+      <div class="text-base font-semibold" style="color:var(--dim)">Nenhum cluster calculado</div>
       <p class="text-sm max-w-sm" style="color:#5a5a78">Clique em "Calcular" para agrupar a biblioteca por similaridade de áudio</p>
     </div>
   {/if}
@@ -153,18 +153,18 @@
 
       <!-- Toolbar -->
       <div class="flex items-center gap-3 flex-wrap">
-        <div class="flex gap-1 p-1 rounded-xl" style="background:#0a0a0f;border:1px solid #1e1e2e">
+        <div class="flex gap-1 p-1 rounded-xl" style="background:var(--bg);border:1px solid #1e1e2e">
           <button
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
             style={mode === '2d'
-              ? 'background:rgba(124,106,245,0.18);color:#9d8eff'
+              ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi)'
               : 'color:#5a5a78'}
             onclick={() => mode = '2d'}
           >2D Scatter</button>
           <button
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
             style={mode === '3d'
-              ? 'background:rgba(124,106,245,0.18);color:#9d8eff'
+              ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi)'
               : 'color:#5a5a78'}
             onclick={() => mode = '3d'}
           >3D Vista</button>
@@ -200,7 +200,7 @@
           <div
             bind:this={tooltipEl}
             class="fixed z-50 pointer-events-none rounded-xl px-2.5 py-1.5 text-xs text-white"
-            style="display:none;background:#1c1c28;border:1px solid #2e2e4a;max-width:192px"
+            style="display:none;background:var(--surface3);border:1px solid var(--border-hi);max-width:192px"
           ></div>
         </div>
 
@@ -230,7 +230,7 @@
             <div class="rounded-2xl border overflow-hidden flex-1 flex flex-col"
                  style="background:#111118;border-color:#1e1e2e">
               <div class="px-3 py-2.5 border-b flex items-center justify-between"
-                   style="border-color:#1a1a28">
+                   style="border-color:var(--border)">
                 <div class="flex items-center gap-2">
                   <span class="w-2.5 h-2.5 rounded-full" style="background:{selectedCluster.color}"></span>
                   <span class="text-sm font-semibold text-white">Cluster {selectedId + 1}</span>
@@ -253,7 +253,7 @@
             <div class="rounded-2xl border flex-1 flex items-center justify-center text-center p-4"
                  style="background:#111118;border-color:#1e1e2e">
               <div>
-                <div class="text-xl mb-1.5" style="color:#2e2e4a">⊛</div>
+                <div class="text-xl mb-1.5" style="color:var(--border-hi)">⊛</div>
                 <div class="text-sm" style="color:#5a5a78">Clique em um cluster</div>
               </div>
             </div>

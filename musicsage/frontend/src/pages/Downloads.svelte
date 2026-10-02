@@ -569,7 +569,7 @@
         {@const prog = tcJobProgress(job)}
         {@const pct  = prog.total > 0 ? Math.round((prog.done + prog.error) / prog.total * 100) : 0}
         {@const statusColor = tcJobStatusColor(job)}
-        <div class="rounded-xl border p-3 space-y-2" style="background:#0d0d18;border-color:#1a1a28">
+        <div class="rounded-xl border p-3 space-y-2" style="background:#0d0d18;border-color:var(--border)">
           <!-- Job header -->
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
@@ -579,13 +579,13 @@
               </span>
               <!-- status badge -->
               {#if job.status === 'running'}
-                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(157,142,255,0.12);color:#9d8eff">baixando</span>
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(157,142,255,0.12);color:var(--accent-hi)">baixando</span>
               {:else if job.status === 'done'}
                 <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(29,185,84,0.12);color:#1db954">✓ concluído</span>
               {:else if job.status === 'cancelled'}
                 <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(90,90,120,0.2);color:#5a5a78">cancelado</span>
               {:else}
-                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(248,113,113,0.12);color:#f87171">✗ erro</span>
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(248,113,113,0.12);color:var(--danger)">✗ erro</span>
               {/if}
             </div>
             <div class="flex items-center gap-1 shrink-0">
@@ -608,7 +608,7 @@
                 <span>{prog.done} de {prog.total} álbuns{prog.error > 0 ? ` · ${prog.error} erro(s)` : ''}</span>
                 <span style="color:{statusColor}">{pct}%</span>
               </div>
-              <div class="h-1.5 rounded-full" style="background:#1a1a28">
+              <div class="h-1.5 rounded-full" style="background:var(--border)">
                 <div class="h-1.5 rounded-full transition-all" style="width:{pct}%;background:{statusColor}"></div>
               </div>
             </div>
@@ -619,14 +619,14 @@
             {#each job.albums as a}
               <div class="flex items-center gap-1.5 text-2xs">
                 <span style="color:{albumStatusColor(a.status)};font-size:10px">{albumStatusIcon(a.status)}</span>
-                <span class="truncate" style="color:{a.status === 'done' ? '#c0c0d0' : a.status === 'error' ? '#f87171' : '#5a5a78'}">{a.name}</span>
+                <span class="truncate" style="color:{a.status === 'done' ? '#c0c0d0' : a.status === 'error' ? 'var(--danger)' : '#5a5a78'}">{a.name}</span>
               </div>
             {/each}
           </div>
 
           <!-- Error message -->
           {#if job.lastError}
-            <div class="text-2xs rounded px-2 py-1 break-all" style="background:rgba(248,113,113,0.07);color:#f87171">{job.lastError}</div>
+            <div class="text-2xs rounded px-2 py-1 break-all" style="background:rgba(248,113,113,0.07);color:var(--danger)">{job.lastError}</div>
           {/if}
         </div>
       {/each}
@@ -639,16 +639,16 @@
             <div class="flex items-center gap-2">
               <span class="text-xs font-medium text-white truncate">{run.title}</span>
               {#if run.auto}
-                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:#38bdf8">auto</span>
+                <span class="text-2xs px-1.5 py-px rounded font-medium" style="background:rgba(56,189,248,0.1);color:var(--info)">auto</span>
               {/if}
             </div>
           </div>
           {#if run.status === 'running'}
-            <span class="text-2xs" style="color:#9d8eff">movendo…</span>
+            <span class="text-2xs" style="color:var(--accent-hi)">movendo…</span>
           {:else if run.status === 'done'}
             <span class="text-2xs" style="color:#1db954">✓ na biblioteca</span>
           {:else}
-            <span class="text-2xs" style="color:#f87171">✗ erro</span>
+            <span class="text-2xs" style="color:var(--danger)">✗ erro</span>
           {/if}
         </div>
       {/each}
@@ -662,14 +662,15 @@
           <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
             {#each queueHistory as h}
               <div class="flex items-center gap-2">
-                <span style="color:{h.status === 'done' ? '#1db954' : h.status === 'cancelled' ? '#5a5a78' : '#f87171'}">
+                <span style="color:{h.status === 'done' ? '#1db954' : h.status === 'cancelled' ? '#5a5a78' : 'var(--danger)'}">
                   {h.status === 'done' ? '✓' : h.status === 'cancelled' ? '○' : '✗'}
                 </span>
-                <span class="truncate flex-1" style="color:#8888a8">
+                <span class="truncate flex-1" style="color:var(--dim)">
                   {#if h.source === 'torrent'}⚡{:else if h.source === 'tidal'}🌊{:else}🚚{/if}
                   {h.title ?? h.id}
                 </span>
-                <span class="shrink-0" style="color:#3a3a58">
+                <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
+                <span class="shrink-0" style="color:var(--muted)">
                   {h.finishedAt ? new Date(h.finishedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                 </span>
               </div>
@@ -683,17 +684,18 @@
   <!-- ── PEDIDOS DO HERMES ─────────────────────────────── -->
   {#if hermesItems.length}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:rgba(124,106,245,0.25)">
-      <div class="px-5 py-4 border-b flex items-center gap-2 flex-wrap" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b flex items-center gap-2 flex-wrap" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">✉ Pedidos do Hermes</div>
         <span class="text-2xs px-2 py-0.5 rounded-full"
-              style="background:rgba(124,106,245,0.18);color:#9d8eff">{hermesItems.length}</span>
+              style="background:rgba(124,106,245,0.18);color:var(--accent-hi)">{hermesItems.length}</span>
         <div class="flex-1"></div>
+          <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
         {#if hermesDir}
-          <code class="text-2xs truncate" style="color:#3a3a58" title={hermesDir}>{hermesDir}/requests.md</code>
+          <code class="text-2xs truncate" style="color:var(--muted)" title={hermesDir}>{hermesDir}/requests.md</code>
         {/if}
       </div>
 
-      <div class="divide-y" style="border-color:#1a1a28">
+      <div class="divide-y" style="border-color:var(--border)">
         {#each hermesItems as item (item.id)}
           <div class="px-5 py-3">
             <div class="flex items-center gap-3 flex-wrap">
@@ -703,17 +705,19 @@
 
               <div class="min-w-0 flex-1">
                 <div class="text-sm text-white truncate">
+                    <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
                   {#if item.artist}
                     <span style="color:#9999bb">{item.artist}</span>
-                    <span style="color:#3a3a58"> — </span>{item.title}
+                    <span style="color:var(--muted)"> — </span>{item.title}
                   {:else}
                     {item.text}
                   {/if}
                 </div>
+                  <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
                 <div class="text-2xs mt-0.5" style="color:#5a5a78" title={item.reason}>
                   {item.kind === 'track' ? 'faixa' : item.kind === 'album' ? 'álbum' : 'tipo não informado'}
                   {#if item.tidalUrl} · link do Tidal{/if}
-                  {#if item.reason} · <span style="color:#3a3a58">{item.reason}</span>{/if}
+                  {#if item.reason} · <span style="color:var(--muted)">{item.reason}</span>{/if}
                 </div>
               </div>
 
@@ -740,10 +744,10 @@
 
             <!-- Faixas achadas no Tidal para este pedido -->
             {#if hermesTracks[item.id]?.length}
-              <div class="mt-2 ml-8 rounded-lg overflow-hidden" style="background:#0a0a0f;border:1px solid #1a1a28">
+              <div class="mt-2 ml-8 rounded-lg overflow-hidden" style="background:var(--bg);border:1px solid var(--border)">
                 {#each hermesTracks[item.id] as t}
                   <button
-                    class="w-full text-left px-3 py-2 flex items-center gap-2 transition-colors hover:bg-[#16161f]"
+                    class="w-full text-left px-3 py-2 flex items-center gap-2 transition-colors hover:bg-[var(--surface2)]"
                     onclick={() => hermesDownloadTrack(item, t)}
                   >
                     <span class="text-2xs shrink-0" style="color:#1db954">↓</span>
@@ -756,23 +760,24 @@
                 {/each}
               </div>
             {/if}
+      <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
           </div>
         {/each}
       </div>
 
-      <div class="px-5 py-2 text-2xs border-t" style="border-color:#1a1a28;color:#3a3a58">
+      <div class="px-5 py-2 text-2xs border-t" style="border-color:var(--border);color:var(--muted)">
         Escritos pelo Hermes em <code>requests.md</code>. A linha sai do arquivo quando o download conclui.
       </div>
     </div>
   {/if}
 
   <!-- Tab switcher -->
-  <div class="flex gap-1 p-1 rounded-xl w-fit" style="background:#0a0a0f;border:1px solid #1e1e2e">
+  <div class="flex gap-1 p-1 rounded-xl w-fit" style="background:var(--bg);border:1px solid #1e1e2e">
     {#each [['stormbringer','↯ Stormbringer'],['tidecaller','∿ TideCaller'],['transporter','↑ Transporter']] as [tab, label]}
       <button
         class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
         style={activeTab === tab
-          ? 'background:rgba(124,106,245,0.18);color:#9d8eff;border:1px solid rgba(124,106,245,0.25)'
+          ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.25)'
           : 'color:#5a5a78;border:1px solid transparent'}
         onclick={() => activeTab = tab}
       >{label}</button>
@@ -782,19 +787,19 @@
   <!-- ── STORMBRINGER ──────────────────────────────────── -->
   {#if activeTab === 'stormbringer'}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-      <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">Stormbringer — Buscar Torrent</div>
       </div>
       <div class="px-5 py-4 space-y-4">
         <!-- Search row -->
         <div class="space-y-2">
           <!-- Type selector -->
-          <div class="flex gap-1 p-1 rounded-lg w-fit" style="background:#0a0a0f">
+          <div class="flex gap-1 p-1 rounded-lg w-fit" style="background:var(--bg)">
             {#each [['music','Música'],['movie','Filme'],['series','Série']] as [t, l]}
               <button
                 class="px-3 py-1 rounded-md text-2xs font-semibold transition-all"
                 style={sbType === t
-                  ? 'background:rgba(124,106,245,0.18);color:#9d8eff'
+                  ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi)'
                   : 'color:#5a5a78'}
                 onclick={() => { sbType = t; sbClearTypeFields(); }}
               >{l}</button>
@@ -810,7 +815,7 @@
                 placeholder="Nome do artista…"
                 class="flex-1 min-w-48 rounded-lg px-3 py-1.5 text-sm text-white transition-colors
                        placeholder:text-[#5a5a78] focus:outline-none"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -821,7 +826,7 @@
                 placeholder="Álbum (opcional)"
                 class="flex-1 min-w-36 rounded-lg px-3 py-1.5 text-sm text-white transition-colors
                        placeholder:text-[#5a5a78] focus:outline-none"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -838,7 +843,7 @@
                 placeholder="Título do filme…"
                 class="flex-1 min-w-48 rounded-lg px-3 py-1.5 text-sm text-white transition-colors
                        placeholder:text-[#5a5a78] focus:outline-none"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -850,7 +855,7 @@
                 min="1900" max="2099"
                 class="w-24 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none
                        placeholder:text-[#5a5a78]"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -867,7 +872,7 @@
                 placeholder="Nome da série…"
                 class="flex-1 min-w-48 rounded-lg px-3 py-1.5 text-sm text-white transition-colors
                        placeholder:text-[#5a5a78] focus:outline-none"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -881,7 +886,7 @@
                   min="1"
                   class="w-14 rounded-lg px-2 py-1.5 text-sm text-white text-center focus:outline-none
                          placeholder:text-[#5a5a78]"
-                  style="background:#16161f;border:1px solid #1e1e2e"
+                  style="background:var(--surface2);border:1px solid #1e1e2e"
                   onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                   onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                   onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -896,7 +901,7 @@
                   min="1"
                   class="w-14 rounded-lg px-2 py-1.5 text-sm text-white text-center focus:outline-none
                          placeholder:text-[#5a5a78]"
-                  style="background:#16161f;border:1px solid #1e1e2e"
+                  style="background:var(--surface2);border:1px solid #1e1e2e"
                   onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                   onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                   onkeydown={e => e.key === 'Enter' && sbSearch()}
@@ -908,7 +913,7 @@
         </div>
 
         {#if sbError}
-          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">{sbError}<button class="ml-2 opacity-60 hover:opacity-100" onclick={() => sbError = ''}>✕</button></div>
+          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">{sbError}<button class="ml-2 opacity-60 hover:opacity-100" onclick={() => sbError = ''}>✕</button></div>
         {/if}
 
         {#if sbLoading}
@@ -928,7 +933,7 @@
                 bind:value={sbPageSize}
                 onchange={() => sbPage = 0}
                 class="rounded-lg px-2 py-1 text-2xs text-white focus:outline-none"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
               >
                 {#each [25, 50, 100] as n}
                   <option value={n}>{n}</option>
@@ -939,10 +944,10 @@
           </div>
 
           <!-- Tabela de resultados -->
-          <div class="overflow-x-auto rounded-xl border" style="border-color:#1a1a28">
+          <div class="overflow-x-auto rounded-xl border" style="border-color:var(--border)">
             <table class="w-full text-sm">
               <thead style="position:sticky;top:0;background:#111118;z-index:1">
-                <tr class="border-b" style="border-color:#1a1a28">
+                <tr class="border-b" style="border-color:var(--border)">
                   <th
                     class="text-left py-2.5 px-3 text-2xs font-semibold uppercase tracking-wider cursor-pointer select-none"
                     style="color:#5a5a78"
@@ -987,16 +992,16 @@
               <button
                 class="px-3 py-1.5 rounded-lg text-2xs font-medium transition-all"
                 style={sbPage === 0
-                  ? 'color:#2e2e4a;cursor:default'
-                  : 'background:#16161f;border:1px solid #1e1e2e;color:#8888a8'}
+                  ? 'color:var(--border-hi);cursor:default'
+                  : 'background:var(--surface2);border:1px solid #1e1e2e;color:var(--dim)'}
                 disabled={sbPage === 0}
                 onclick={() => sbPage = 0}
               >«</button>
               <button
                 class="px-3 py-1.5 rounded-lg text-2xs font-medium transition-all"
                 style={sbPage === 0
-                  ? 'color:#2e2e4a;cursor:default'
-                  : 'background:#16161f;border:1px solid #1e1e2e;color:#8888a8'}
+                  ? 'color:var(--border-hi);cursor:default'
+                  : 'background:var(--surface2);border:1px solid #1e1e2e;color:var(--dim)'}
                 disabled={sbPage === 0}
                 onclick={() => sbPage--}
               >‹ Anterior</button>
@@ -1007,8 +1012,8 @@
                 <button
                   class="w-8 h-8 rounded-lg text-2xs font-semibold transition-all"
                   style={p === sbPage
-                    ? 'background:rgba(124,106,245,0.18);border:1px solid rgba(124,106,245,0.3);color:#9d8eff'
-                    : 'background:#16161f;border:1px solid #1e1e2e;color:#5a5a78'}
+                    ? 'background:rgba(124,106,245,0.18);border:1px solid rgba(124,106,245,0.3);color:var(--accent-hi)'
+                    : 'background:var(--surface2);border:1px solid #1e1e2e;color:#5a5a78'}
                   onclick={() => sbPage = p}
                 >{p + 1}</button>
               {/each}
@@ -1016,16 +1021,16 @@
               <button
                 class="px-3 py-1.5 rounded-lg text-2xs font-medium transition-all"
                 style={sbPage >= sbTotalPages() - 1
-                  ? 'color:#2e2e4a;cursor:default'
-                  : 'background:#16161f;border:1px solid #1e1e2e;color:#8888a8'}
+                  ? 'color:var(--border-hi);cursor:default'
+                  : 'background:var(--surface2);border:1px solid #1e1e2e;color:var(--dim)'}
                 disabled={sbPage >= sbTotalPages() - 1}
                 onclick={() => sbPage++}
               >Próxima ›</button>
               <button
                 class="px-3 py-1.5 rounded-lg text-2xs font-medium transition-all"
                 style={sbPage >= sbTotalPages() - 1
-                  ? 'color:#2e2e4a;cursor:default'
-                  : 'background:#16161f;border:1px solid #1e1e2e;color:#8888a8'}
+                  ? 'color:var(--border-hi);cursor:default'
+                  : 'background:var(--surface2);border:1px solid #1e1e2e;color:var(--dim)'}
                 disabled={sbPage >= sbTotalPages() - 1}
                 onclick={() => sbPage = sbTotalPages() - 1}
               >»</button>
@@ -1045,7 +1050,7 @@
 
       <!-- Auth status -->
       <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-        <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+        <div class="px-5 py-4 border-b" style="border-color:var(--border)">
           <div class="text-sm font-semibold text-white">Autenticação Tidal</div>
         </div>
         <div class="px-5 py-4">
@@ -1056,7 +1061,7 @@
               {#if tcTokenValid}
                 <span class="text-2xs px-2 py-1 rounded font-medium" style="background:rgba(29,185,84,0.12);color:#1db954;border:1px solid rgba(29,185,84,0.2)">Token válido</span>
               {:else}
-                <span class="text-2xs px-2 py-1 rounded font-medium" style="background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.2)">Token inválido ou expirado</span>
+                <span class="text-2xs px-2 py-1 rounded font-medium" style="background:rgba(239,68,68,0.1);color:var(--danger);border:1px solid rgba(239,68,68,0.2)">Token inválido ou expirado</span>
               {/if}
               <Button size="xs" variant="ghost" onclick={checkTcToken}>↻ Verificar</Button>
               <Button size="xs" onclick={() => startOauth(false)} loading={tcAuthLoading}>Renovar token</Button>
@@ -1064,19 +1069,19 @@
             </div>
 
             {#if tcOauthUrl || tcOauthCode}
-              <div class="rounded-xl border p-4 space-y-3" style="background:#16161f;border-color:rgba(124,106,245,0.25)">
-                <div class="text-sm font-semibold" style="color:#9d8eff">Autorização necessária</div>
+              <div class="rounded-xl border p-4 space-y-3" style="background:var(--surface2);border-color:rgba(124,106,245,0.25)">
+                <div class="text-sm font-semibold" style="color:var(--accent-hi)">Autorização necessária</div>
                 {#if tcOauthUrl}
                   <div class="text-2xs" style="color:#5a5a78">
                     Acesse: <a href={tcOauthUrl} target="_blank" rel="noopener noreferrer"
-                       class="underline break-all" style="color:#9d8eff">{tcOauthUrl}</a>
+                       class="underline break-all" style="color:var(--accent-hi)">{tcOauthUrl}</a>
                   </div>
                 {/if}
                 {#if tcOauthCode}
                   <div class="flex items-center gap-2">
                     <span class="text-2xs" style="color:#5a5a78">Código:</span>
                     <span class="font-mono font-bold text-white text-lg tracking-widest px-3 py-1 rounded"
-                          style="background:#1c1c28">{tcOauthCode}</span>
+                          style="background:var(--surface3)">{tcOauthCode}</span>
                   </div>
                 {/if}
                 {#if tcOauthStatus === 'pending'}
@@ -1084,7 +1089,7 @@
                 {:else if tcOauthStatus === 'done'}
                   <span class="text-2xs font-medium" style="color:#1db954">Autenticado com sucesso!</span>
                 {:else if tcOauthStatus === 'error'}
-                  <span class="text-2xs font-medium" style="color:#ef4444">Falha na autenticação</span>
+                  <span class="text-2xs font-medium" style="color:var(--danger)">Falha na autenticação</span>
                 {/if}
               </div>
             {/if}
@@ -1095,7 +1100,7 @@
       <!-- Baixar álbum OU faixa por link do Tidal -->
       {#if tcTokenValid}
         <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-          <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+          <div class="px-5 py-4 border-b" style="border-color:var(--border)">
             <div class="text-sm font-semibold text-white">Baixar por Link</div>
           </div>
           <div class="px-5 py-4">
@@ -1106,7 +1111,7 @@
                 placeholder="Link de álbum ou de faixa do Tidal…"
                 class="flex-1 min-w-64 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none
                        placeholder:text-[#5a5a78]"
-                style="background:#16161f;border:1px solid #1e1e2e"
+                style="background:var(--surface2);border:1px solid #1e1e2e"
                 onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                 onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                 onkeydown={e => e.key === 'Enter' && tcDownloadFromUrl()}
@@ -1127,7 +1132,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Artist search -->
           <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-            <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+            <div class="px-5 py-4 border-b" style="border-color:var(--border)">
               <div class="text-sm font-semibold text-white">Buscar Artista</div>
             </div>
             <div class="px-5 py-4">
@@ -1138,7 +1143,7 @@
                   placeholder="Nome do artista…"
                   class="flex-1 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none
                          placeholder:text-[#5a5a78]"
-                  style="background:#16161f;border:1px solid #1e1e2e"
+                  style="background:var(--surface2);border:1px solid #1e1e2e"
                   onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
                   onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
                   onkeydown={e => e.key === 'Enter' && tcSearchArtists()}
@@ -1152,7 +1157,7 @@
                   {#each tcArtists as a}
                     <button
                       class="list-row w-full text-left px-2.5 py-2 rounded-lg text-sm transition-all"
-                      style={tcSelectedArtist?.id === a.id ? 'background:rgba(124,106,245,0.12);color:#fff' : 'color:#8888a8'}
+                      style={tcSelectedArtist?.id === a.id ? 'background:rgba(124,106,245,0.12);color:#fff' : 'color:var(--dim)'}
                       onclick={() => tcLoadAlbums(a)}
                     >{a.name ?? '?'}</button>
                   {/each}
@@ -1163,7 +1168,7 @@
 
           <!-- Albums -->
           <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-            <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+            <div class="px-5 py-4 border-b" style="border-color:var(--border)">
               <div class="text-sm font-semibold text-white">{tcSelectedArtist ? `Álbuns — ${tcSelectedArtist.name}` : 'Álbuns'}</div>
             </div>
             <div class="px-5 py-4">
@@ -1173,7 +1178,7 @@
                 <div class="space-y-0.5 max-h-52 overflow-y-auto mb-4">
                   {#each tcAlbums as a}
                     <label class="list-row flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer">
-                      <input type="checkbox" checked={tcSelectedAlbums.has(a.id)} onchange={() => tcToggleAlbum(a)} class="accent-[#7c6af5]" />
+                      <input type="checkbox" checked={tcSelectedAlbums.has(a.id)} onchange={() => tcToggleAlbum(a)} class="accent-[var(--accent)]" />
                       <span class="text-sm text-white flex-1 truncate">{a.title ?? a.name ?? '?'}</span>
                       {#if a.year}<span class="text-2xs" style="color:#5a5a78">{a.year}</span>{/if}
                     </label>
@@ -1201,7 +1206,7 @@
   <!-- ── TRANSPORTER ───────────────────────────────────── -->
   {#if activeTab === 'transporter'}
     <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-      <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+      <div class="px-5 py-4 border-b" style="border-color:var(--border)">
         <div class="text-sm font-semibold text-white">Transporter — Mover arquivos para Plex</div>
       </div>
       <div class="px-5 py-4 space-y-4">
@@ -1213,8 +1218,8 @@
               <button
                 class="px-3 py-1.5 rounded-lg text-sm font-medium border transition-all"
                 style={tpType === t
-                  ? 'background:rgba(124,106,245,0.18);border-color:rgba(124,106,245,0.3);color:#9d8eff'
-                  : 'background:#16161f;border-color:#1e1e2e;color:#5a5a78'}
+                  ? 'background:rgba(124,106,245,0.18);border-color:rgba(124,106,245,0.3);color:var(--accent-hi)'
+                  : 'background:var(--surface2);border-color:#1e1e2e;color:#5a5a78'}
                 onclick={() => tpType = t}
               >{l}</button>
             {/each}
@@ -1222,7 +1227,7 @@
         </div>
 
         {#if tpError}
-          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">{tpError}<button class="ml-2 opacity-60" onclick={() => tpError = ''}>✕</button></div>
+          <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">{tpError}<button class="ml-2 opacity-60" onclick={() => tpError = ''}>✕</button></div>
         {/if}
 
         <div class="flex gap-2">
@@ -1237,14 +1242,14 @@
               {totalFiles > 0 ? `Arquivos Pendentes (${totalFiles})` : 'Nenhum arquivo pendente'}
             </div>
             {#if totalFiles > 0}
-              <div class="max-h-64 overflow-y-auto rounded-xl border" style="border-color:#1a1a28">
+              <div class="max-h-64 overflow-y-auto rounded-xl border" style="border-color:var(--border)">
                 {#each tpPending.filter(s => (s.count ?? 0) > 0) as src}
-                  <div class="border-b last:border-0" style="border-color:#1a1a28">
+                  <div class="border-b last:border-0" style="border-color:var(--border)">
                     <div class="flex items-center gap-2 px-3 py-2">
                       <span class="text-sm">{src.icon ?? '📁'}</span>
                       <span class="text-xs font-medium text-white flex-1">{src.name}</span>
                       <span class="text-2xs px-1.5 py-0.5 rounded font-medium"
-                            style="background:rgba(124,106,245,0.1);color:#9d8eff">{src.count}</span>
+                            style="background:rgba(124,106,245,0.1);color:var(--accent-hi)">{src.count}</span>
                     </div>
                     {#each (src.items ?? []) as item}
                       <div class="list-row flex items-center gap-2 pl-8 pr-3 py-1.5 text-xs">

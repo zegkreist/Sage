@@ -107,6 +107,55 @@
     } catch (e) { toast.error(e.message); }
   }
 
+  // ─── F6: "Você já tem parecidos" (expansível por artista) ────
+  let expandedInLib   = $state({});   // { [artistName]: true }
+  let inLibSimilars   = $state({});   // { [artistName]: [{ name, genre, inLibrary }] }
+  let inLibLoading    = $state({});   // { [artistName]: true }
+  let inLibError      = $state({});   // { [artistName]: string }
+  let creatingFromSim = $state({});   // { [artistName]: true }
+
+  function toggleInLib(artistName) {
+    expandedInLib[artistName] = !expandedInLib[artistName];
+    if (expandedInLib[artistName] && !inLibSimilars[artistName]) loadInLibSimilars(artistName);
+  }
+
+  async function loadInLibSimilars(artistName) {
+    inLibLoading[artistName] = true;
+    inLibError[artistName]   = '';
+    try {
+      // Parâmetro confirmado em src/routes/recommendations.js: ?artist=
+      const list = await api('GET', `/recommendations/similar-in-library?artist=${encodeURIComponent(artistName)}&limit=10`);
+      inLibSimilars[artistName] = (Array.isArray(list) ? list : (list?.artists ?? [])).map(r => ({
+        name:      r.name   ?? r.artist ?? '?',
+        genre:     r.genre  ?? '',
+        inLibrary: r.inLibrary ?? false,
+      }));
+    } catch (e) {
+      inLibError[artistName] = e.message;
+    } finally {
+      inLibLoading[artistName] = false;
+    }
+  }
+
+  /** CTA: cria playlist via POST /api/playlists/from-cache-prompt usando os parecidos em biblioteca */
+  async function createPlaylistFromSimilars(artistName) {
+    const sims = (inLibSimilars[artistName] ?? []).map(a => a.name);
+    if (sims.length === 0) return;
+    creatingFromSim[artistName] = true;
+    try {
+      toast(`Gerando playlist com os parecidos de ${artistName}…`);
+      const started = await api('POST', '/playlists/from-cache-prompt', {
+        prompt: `Playlist com faixas parecidas com ${artistName}, misturando: ${sims.join(', ')}`,
+        maxPerArtist: 3,
+        async: true,
+      }, { timeoutMs: 30_000 });
+      const pl = await pollJob(started.jobId);
+      toast.success(`Playlist "${pl.title ?? pl.name}" criada!`);
+      navigate('playlists');
+    } catch (e) { toast.error(e.message); }
+    finally { creatingFromSim[artistName] = false; }
+  }
+
   // ── Autocomplete de artista ──────────────────────────────────
   function _updateDropPos() {
     if (!_inputEl) return;
@@ -182,10 +231,10 @@
 
   <!-- ── Por Prompt ──────────────────────────────────────────── -->
   <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-    <div class="px-5 py-4 border-b flex items-center gap-2" style="border-color:#1a1a28">
+    <div class="px-5 py-4 border-b flex items-center gap-2" style="border-color:var(--border)">
       <span class="text-sm font-semibold text-white">Por Pedido</span>
       <span class="text-2xs px-1.5 py-0.5 rounded font-medium"
-            style="background:rgba(124,106,245,0.12);color:#9d8eff">IA + Last.fm</span>
+            style="background:rgba(124,106,245,0.12);color:var(--accent-hi)">IA + Last.fm</span>
     </div>
     <div class="px-5 py-4">
       <div class="flex gap-2">
@@ -193,8 +242,8 @@
           type="text"
           bind:value={promptQuery}
           placeholder='Ex: "rock pesado para treinar", "jazz melancólico para trabalhar tarde"…'
-          class="flex-1 rounded-lg px-3 py-2 text-sm text-white transition-colors placeholder:text-[#3a3a58] focus:outline-none"
-          style="background:#16161f;border:1px solid #1e1e2e"
+          class="flex-1 rounded-lg px-3 py-2 text-sm text-white transition-colors placeholder:text-[var(--muted)] focus:outline-none"
+          style="background:var(--surface2);border:1px solid #1e1e2e"
           onfocus={e => e.currentTarget.style.borderColor='rgba(124,106,245,0.4)'}
           onblur={e => e.currentTarget.style.borderColor='#1e1e2e'}
           onkeydown={e => e.key === 'Enter' && generatePromptRecs()}
@@ -202,7 +251,8 @@
         <Button onclick={generatePromptRecs} loading={loadingPrompt} size="sm"
                 disabled={!promptQuery.trim()}>Gerar</Button>
       </div>
-      <p class="text-2xs mt-2" style="color:#3a3a58">
+      <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
+      <p class="text-2xs mt-2" style="color:var(--muted)">
         A IA gera sugestões; cada artista é verificado no Last.fm antes de aparecer
       </p>
 
@@ -210,11 +260,11 @@
         <div class="mt-5 py-4">
           <div class="flex items-center gap-2">
             <Spinner size="sm" />
-            <span class="text-2xs" style="color:#9d8eff">{promptStage || 'Gerando…'}</span>
+            <span class="text-2xs" style="color:var(--accent-hi)">{promptStage || 'Gerando…'}</span>
             <span class="text-2xs ml-auto" style="color:#5a5a78">{promptPct}%</span>
           </div>
-          <div class="h-1.5 rounded-full overflow-hidden mt-2" style="background:#1a1a28">
-            <div class="h-full rounded-full transition-all duration-500" style="width:{promptPct}%;background:linear-gradient(90deg,#7c6af5,#9d8eff)"></div>
+          <div class="h-1.5 rounded-full overflow-hidden mt-2" style="background:var(--border)">
+            <div class="h-full rounded-full transition-all duration-500" style="width:{promptPct}%;background:linear-gradient(90deg,var(--accent),var(--accent-hi))"></div>
           </div>
         </div>
       {:else if promptRecs !== null}
@@ -226,7 +276,7 @@
           <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
             {#each promptRecs as artist, i}
               <div class="rounded-xl p-3 border group transition-all"
-                   style="background:#16161f;border-color:#1e1e2e">
+                   style="background:var(--surface2);border-color:#1e1e2e">
                 <div class="flex items-start gap-2">
                   <span class="rank-chip mt-0.5 shrink-0 {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
                   <div class="flex-1 min-w-0">
@@ -234,23 +284,23 @@
                       <span class="text-sm font-medium text-white truncate">{artist.name}</span>
                       {#if artist.genre}
                         <span class="text-2xs px-1.5 py-0.5 rounded shrink-0"
-                              style="background:rgba(124,106,245,0.12);color:#9d8eff">{artist.genre}</span>
+                              style="background:rgba(124,106,245,0.12);color:var(--accent-hi)">{artist.genre}</span>
                       {/if}
                     </div>
                     {#if artist.whyRecommended}
-                      <p class="text-2xs mt-1 leading-relaxed" style="color:#8888a8">{artist.whyRecommended}</p>
+                      <p class="text-2xs mt-1 leading-relaxed" style="color:var(--dim)">{artist.whyRecommended}</p>
                     {/if}
                   </div>
                 </div>
                 <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
-                          style="background:rgba(56,189,248,0.1);color:#38bdf8"
+                          style="background:rgba(56,189,248,0.1);color:var(--info)"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
-                          style="background:rgba(245,158,11,0.1);color:#f59e0b"
+                          style="background:rgba(245,158,11,0.1);color:var(--warn)"
                           title="Stormbringer" onclick={() => navigateToDownload('stormbringer', artist.name)}>↯</button>
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
-                          style="background:rgba(124,106,245,0.1);color:#9d8eff"
+                          style="background:rgba(124,106,245,0.1);color:var(--accent-hi)"
                           title="Criar playlist" onclick={() => createPlaylistFromArtist(artist.name)}>+</button>
                 </div>
               </div>
@@ -272,7 +322,7 @@
 
       <!-- Artistas Recomendados -->
       <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-        <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:#1a1a28">
+        <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--border)">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold text-white">Baseado no seu perfil</span>
           </div>
@@ -290,11 +340,11 @@
                     <div class="text-sm font-medium text-white truncate">{artist.name}</div>
                     {#if artist.genre}
                       <span class="text-2xs px-1.5 py-0.5 rounded font-medium shrink-0"
-                            style="background:rgba(124,106,245,0.12);color:#9d8eff">{artist.genre}</span>
+                            style="background:rgba(124,106,245,0.12);color:var(--accent-hi)">{artist.genre}</span>
                     {/if}
                   </div>
                   {#if artist.whyRecommended}
-                    <div class="text-2xs mt-1 leading-relaxed" style="color:#8888a8">{artist.whyRecommended}</div>
+                    <div class="text-2xs mt-1 leading-relaxed" style="color:var(--dim)">{artist.whyRecommended}</div>
                   {/if}
                 </div>
                 {#if artist.inLibrary}
@@ -306,15 +356,56 @@
                 {/if}
                 <div class="actions-reveal flex gap-1 shrink-0">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs transition-colors"
-                          style="background:rgba(56,189,248,0.1);color:#38bdf8"
+                          style="background:rgba(56,189,248,0.1);color:var(--info)"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', artist.name)}>∿</button>
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs transition-colors"
-                          style="background:rgba(245,158,11,0.1);color:#f59e0b"
+                          style="background:rgba(245,158,11,0.1);color:var(--warn)"
                           title="Stormbringer" onclick={() => navigateToDownload('stormbringer', artist.name)}>↯</button>
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs transition-colors"
-                          style="background:rgba(124,106,245,0.1);color:#9d8eff"
+                          style="background:rgba(124,106,245,0.1);color:var(--accent-hi)"
                           title="Criar playlist" onclick={() => createPlaylistFromArtist(artist.name)}>+</button>
                 </div>
+                <!-- F6: expansível "Você já tem parecidos" -->
+                <button
+                  class="w-full flex items-center gap-1.5 mt-2 text-left text-2xs font-medium transition-colors"
+                  style="color:var(--muted)"
+                  onclick={() => toggleInLib(artist.name)}
+                  aria-expanded={!!expandedInLib[artist.name]}
+                >
+                  <span class="transition-transform inline-block" style="transform: rotate({expandedInLib[artist.name] ? 90 : 0}deg)">▸</span>
+                  Você já tem parecidos
+                </button>
+                {#if expandedInLib[artist.name]}
+                  <div class="mt-2 rounded-lg p-2.5 border" style="background:var(--bg);border-color:#1e1e2e">
+                    {#if inLibLoading[artist.name]}
+                      <div class="flex items-center gap-2 py-1">
+                        <Spinner size="sm" />
+                        <span class="text-2xs" style="color:#5a5a78">Buscando parecidos na biblioteca…</span>
+                      </div>
+                    {:else if inLibError[artist.name]}
+                      <div class="text-2xs" style="color:var(--danger)">Erro: {inLibError[artist.name]}</div>
+                    {:else if (inLibSimilars[artist.name] ?? []).length === 0}
+                      <div class="text-2xs py-1" style="color:#5a5a78">Nenhum artista parecido encontrado na sua biblioteca</div>
+                    {:else}
+                      <div class="flex flex-wrap gap-1.5 mb-2.5">
+                        {#each inLibSimilars[artist.name] as a}
+                          <span class="text-2xs px-2 py-0.5 rounded-full font-medium truncate max-w-full"
+                                style="background:rgba(29,185,84,0.08);color:#1db954;border:1px solid rgba(29,185,84,0.15)"
+                                title={a.genre || a.name}>{a.name}</span>
+                        {/each}
+                      </div>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        loading={creatingFromSim[artist.name]}
+                        disabled={creatingFromSim[artist.name]}
+                        onclick={() => createPlaylistFromSimilars(artist.name)}
+                      >
+                        🎵 Criar playlist com esses parecidos
+                      </Button>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             {/each}
           {/if}
@@ -323,7 +414,7 @@
 
       <!-- Faixas Recomendadas -->
       <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-        <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:#1a1a28">
+        <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--border)">
           <div class="text-sm font-semibold text-white">Faixas Recomendadas</div>
           <span class="text-2xs" style="color:#5a5a78">{(recs.tracks ?? []).length} faixas</span>
         </div>
@@ -352,7 +443,7 @@
 
   <!-- ── Artistas Similares ───────────────────────────────────── -->
   <div class="rounded-2xl border overflow-hidden" style="background:#111118;border-color:#1e1e2e">
-    <div class="px-5 py-4 border-b" style="border-color:#1a1a28">
+    <div class="px-5 py-4 border-b" style="border-color:var(--border)">
       <div class="text-sm font-semibold text-white">Artistas Similares</div>
       <div class="text-2xs mt-0.5" style="color:#5a5a78">Encontre artistas parecidos com quem você ouve</div>
     </div>
@@ -367,7 +458,7 @@
           placeholder="Nome do artista…"
           class="flex-1 rounded-lg px-3 py-2 text-sm text-white transition-colors
                  placeholder:text-[#5a5a78] focus:outline-none"
-          style="background:#16161f;border:1px solid #1e1e2e"
+          style="background:var(--surface2);border:1px solid #1e1e2e"
           oninput={onArtistInput}
           onfocus={onArtistFocus}
           onblur={e => { e.currentTarget.style.borderColor='#1e1e2e'; onArtistBlur(); }}
@@ -376,7 +467,7 @@
 
         <!-- Dropdown com position:fixed — escapa qualquer overflow:hidden pai -->
         {#if showSugg && suggestions.length > 0}
-          <div style="{_dropStyle};background:#16161f;border:1px solid #2a2a3a;border-radius:0.75rem;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,0.7)">
+          <div style="{_dropStyle};background:var(--surface2);border:1px solid #2a2a3a;border-radius:0.75rem;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,0.7)">
             {#each suggestions as s, idx}
               <button
                 class="w-full text-left px-3 py-2.5 text-sm transition-colors"
@@ -390,7 +481,7 @@
         {/if}
 
         <label class="flex items-center gap-1.5 cursor-pointer text-2xs shrink-0" style="color:#5a5a78">
-          <input type="checkbox" bind:checked={inLibOnly} class="accent-[#7c6af5] w-3 h-3" />
+          <input type="checkbox" bind:checked={inLibOnly} class="accent-[var(--accent)] w-3 h-3" />
           Na biblioteca
         </label>
         <Button onclick={searchSimilar} loading={loadingSim} size="sm">Buscar</Button>
@@ -408,7 +499,7 @@
           <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {#each similar as a}
               <div class="rounded-xl p-3 border transition-all group"
-                   style="background:#16161f;border-color:#1e1e2e">
+                   style="background:var(--surface2);border-color:#1e1e2e">
                 <div class="text-sm font-medium text-white truncate">{a.name}</div>
                 {#if a.genre}
                   <div class="text-2xs truncate mt-0.5" style="color:#5a5a78">{a.genre}</div>
@@ -418,10 +509,10 @@
                 {/if}
                 <div class="actions-reveal flex gap-1 mt-2">
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
-                          style="background:rgba(56,189,248,0.1);color:#38bdf8"
+                          style="background:rgba(56,189,248,0.1);color:var(--info)"
                           title="TideCaller" onclick={() => navigateToDownload('tidecaller', a.name)}>∿</button>
                   <button class="w-6 h-6 rounded flex items-center justify-center text-xs"
-                          style="background:rgba(245,158,11,0.1);color:#f59e0b"
+                          style="background:rgba(245,158,11,0.1);color:var(--warn)"
                           title="Torrent" onclick={() => navigateToDownload('stormbringer', a.name)}>↯</button>
                 </div>
               </div>

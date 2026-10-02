@@ -145,7 +145,7 @@
               class="w-full text-left px-4 py-3.5 rounded-xl border transition-all flex items-center justify-between gap-3"
               style={isActive
                 ? 'background:rgba(124,106,245,0.14);border-color:rgba(124,106,245,0.3);color:#fff'
-                : 'background:#111118;border-color:#1e1e2e;color:#8888a8'}
+                : 'background:#111118;border-color:#1e1e2e;color:var(--dim)'}
               onclick={() => selectPlaylist(pl.id ?? pl.ratingKey)}
             >
               <div class="min-w-0">
@@ -165,14 +165,14 @@
       <div class="rounded-2xl border overflow-hidden flex flex-col" style="background:#111118;border-color:#1e1e2e">
 
         <!-- Barra superior: voltar + título + ações -->
-        <div class="px-4 py-3 border-b flex flex-col gap-3" style="border-color:#1a1a28">
+        <div class="px-4 py-3 border-b flex flex-col gap-3" style="border-color:var(--border)">
 
           <!-- Linha 1: botão voltar -->
           <div class="flex items-center gap-2">
             <button
               onclick={goBackToList}
               class="flex items-center gap-1 text-sm font-semibold transition-colors"
-              style="color:#7c6af5"
+              style="color:var(--accent)"
             >
               ‹ Playlists
             </button>
@@ -181,7 +181,7 @@
           {#if loadingDetail}
             <div class="flex items-center gap-3 py-2"><Spinner /><span class="text-sm" style="color:#5a5a78">Carregando…</span></div>
           {:else if error}
-            <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">{error}</div>
+            <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">{error}</div>
           {:else if detail}
             {#if isRenaming}
               <!-- Modo edição de nome -->
@@ -190,7 +190,7 @@
                   type="text"
                   bind:value={editName}
                   class="flex-1 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                  style="background:#16161f;border:1px solid rgba(124,106,245,0.4)"
+                  style="background:var(--surface2);border:1px solid rgba(124,106,245,0.4)"
                   onkeydown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') isRenaming = false; }}
                   autofocus
                 />
@@ -219,7 +219,7 @@
           <div class="overflow-y-auto px-4 py-2" style="max-height:calc(100vh - var(--mobile-header-h) - var(--mobile-nav-h) - 10rem)">
             {#if (detail.tracks ?? []).length === 0}
               <div class="py-10 text-center">
-                <div class="text-xl mb-2" style="color:#2e2e4a">♪</div>
+                <div class="text-xl mb-2" style="color:var(--border-hi)">♪</div>
                 <div class="text-sm" style="color:#5a5a78">Playlist vazia</div>
               </div>
             {:else}
@@ -264,7 +264,7 @@
               class="w-full text-left px-3 py-2.5 rounded-xl border transition-all"
               style={isActive
                 ? 'background:rgba(124,106,245,0.14);border-color:rgba(124,106,245,0.3);color:#fff'
-                : 'background:#111118;border-color:#1e1e2e;color:#8888a8'}
+                : 'background:#111118;border-color:#1e1e2e;color:var(--dim)'}
               onclick={() => selectPlaylist(pl.id ?? pl.ratingKey)}
             >
               <div class="text-sm font-medium truncate">{pl.title ?? pl.name ?? '?'}</div>
@@ -282,7 +282,7 @@
         {#if !$selectedPlaylistId}
           <div class="flex-1 flex items-center justify-center">
             <div class="text-center">
-              <div class="text-2xl mb-2" style="color:#2e2e4a">←</div>
+              <div class="text-2xl mb-2" style="color:var(--border-hi)">←</div>
               <div class="text-sm" style="color:#5a5a78">Selecione uma playlist</div>
             </div>
           </div>
@@ -292,11 +292,11 @@
           </div>
         {:else if error}
           <div class="p-5">
-            <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">{error}</div>
+            <div class="rounded-xl px-4 py-3 text-sm border" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">{error}</div>
           </div>
         {:else if detail}
           <!-- Cabeçalho da playlist -->
-          <div class="px-5 py-4 border-b flex items-center gap-3" style="border-color:#1a1a28">
+          <div class="px-5 py-4 border-b flex items-center gap-3" style="border-color:var(--border)">
             <div class="flex-1 min-w-0">
               {#if isRenaming}
                 <div class="flex gap-2 items-center">
@@ -304,7 +304,7 @@
                     type="text"
                     bind:value={editName}
                     class="flex-1 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none"
-                    style="background:#16161f;border:1px solid rgba(124,106,245,0.4)"
+                    style="background:var(--surface2);border:1px solid rgba(124,106,245,0.4)"
                     onkeydown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') isRenaming = false; }}
                     autofocus
                   />
@@ -327,7 +327,7 @@
           <div class="flex-1 overflow-y-auto px-5 py-2">
             {#if (detail.tracks ?? []).length === 0}
               <div class="py-8 text-center">
-                <div class="text-xl mb-2" style="color:#2e2e4a">♪</div>
+                <div class="text-xl mb-2" style="color:var(--border-hi)">♪</div>
                 <div class="text-sm" style="color:#5a5a78">Playlist vazia</div>
               </div>
             {:else}

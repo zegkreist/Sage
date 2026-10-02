@@ -27,7 +27,7 @@
     <span class="text-2xs font-semibold uppercase tracking-widest" style="color:#5a5a78">{label}</span>
     {#if icon}
       <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
-        style="background: rgba(124,106,245,0.1); color: #9d8eff">{icon}</span>
+        style="background: rgba(124,106,245,0.1); color: var(--accent-hi)">{icon}</span>
     {/if}
   </div>
 

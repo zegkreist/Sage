@@ -190,7 +190,7 @@
     <div class="flex gap-2 flex-wrap">
       <button
         class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-        style="background:rgba(124,106,245,0.12);color:#9d8eff;border:1px solid rgba(124,106,245,0.2)"
+        style="background:rgba(124,106,245,0.12);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.2)"
         onclick={refreshLines}
         title="Atualizar"
       >↻ Atualizar</button>
@@ -212,13 +212,13 @@
       >⬇ Scroll</button>
       <button
         class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-        style="background:rgba(245,158,11,0.1);color:#f59e0b;border:1px solid rgba(245,158,11,0.2)"
+        style="background:rgba(245,158,11,0.1);color:var(--warn);border:1px solid rgba(245,158,11,0.2)"
         onclick={clearToday}
         title="Zera o log de hoje"
       >⊘ Zerar hoje</button>
       <button
         class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-        style="background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.2)"
+        style="background:rgba(248,113,113,0.1);color:var(--danger);border:1px solid rgba(248,113,113,0.2)"
         onclick={clearAll}
         title="Remove todos os arquivos de log"
       >✕ Zerar tudo</button>
@@ -231,21 +231,21 @@
 
     <!-- Stats row -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
+      <div class="rounded-2xl border p-4" style="background:#111118;border-color:var(--border)">
         <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Arquivos</div>
         <div class="text-xl font-bold text-white">{files.length}</div>
       </div>
-      <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
+      <div class="rounded-2xl border p-4" style="background:#111118;border-color:var(--border)">
         <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Linhas</div>
         <div class="text-xl font-bold text-white">{lines.length}</div>
       </div>
-      <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
+      <div class="rounded-2xl border p-4" style="background:#111118;border-color:var(--border)">
         <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Erros</div>
-        <div class="text-xl font-bold" style="color:#f87171">{errorCount}</div>
+        <div class="text-xl font-bold" style="color:var(--danger)">{errorCount}</div>
       </div>
-      <div class="rounded-2xl border p-4" style="background:#111118;border-color:#1a1a28">
+      <div class="rounded-2xl border p-4" style="background:#111118;border-color:var(--border)">
         <div class="text-2xs uppercase tracking-wider mb-1" style="color:#5a5a78">Avisos</div>
-        <div class="text-xl font-bold" style="color:#f59e0b">{warnCount}</div>
+        <div class="text-xl font-bold" style="color:var(--warn)">{warnCount}</div>
       </div>
     </div>
 
@@ -258,12 +258,12 @@
         class="flex-1 min-w-0 rounded-lg px-3 py-2 text-xs text-white transition-colors focus:outline-none"
         style="background:#111118;border:1px solid #1e1e2e;min-width:200px"
       />
-      <div class="flex gap-1 p-1 rounded-lg" style="background:#0a0a0f">
+      <div class="flex gap-1 p-1 rounded-lg" style="background:var(--bg)">
         {#each ['', 'INFO', 'WARN', 'ERROR', 'DEBUG', 'HTTP'] as lvl}
           <button
             class="px-2.5 py-1 rounded-md text-2xs font-semibold transition-all"
             style={filterLevel === lvl
-              ? 'background:rgba(124,106,245,0.18);color:#9d8eff;border:1px solid rgba(124,106,245,0.25)'
+              ? 'background:rgba(124,106,245,0.18);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.25)'
               : 'color:#5a5a78;border:1px solid transparent'}
             onclick={() => filterLevel = lvl}
           >{lvl || 'Todos'}</button>
@@ -277,8 +277,8 @@
     <div class="grid grid-cols-1 xl:grid-cols-4 gap-5" style="min-height:0">
 
       <!-- Log viewer -->
-      <div class="xl:col-span-3 rounded-2xl border flex flex-col" style="background:#080810;border-color:#1a1a28;height:600px">
-        <div class="flex items-center justify-between px-4 py-3 border-b shrink-0" style="border-color:#1a1a28">
+      <div class="xl:col-span-3 rounded-2xl border flex flex-col" style="background:#080810;border-color:var(--border);height:600px">
+        <div class="flex items-center justify-between px-4 py-3 border-b shrink-0" style="border-color:var(--border)">
           <div class="text-sm font-semibold text-white">
             {selectedFile ?? 'Hoje'}
           </div>
@@ -300,7 +300,7 @@
               {@const level = levelFromLine(line)}
               <div
                 class="py-0.5 px-1 rounded transition-colors hover:bg-white/5 whitespace-pre-wrap break-all"
-                style={level ? LEVEL_COLOR[level] : 'color:#8888a8'}
+                style={level ? LEVEL_COLOR[level] : 'color:var(--dim)'}
               >{line}</div>
             {/each}
           {/if}
@@ -308,19 +308,19 @@
       </div>
 
       <!-- File list -->
-      <div class="rounded-2xl border flex flex-col" style="background:#111118;border-color:#1a1a28;height:600px">
-        <div class="px-4 py-3 border-b shrink-0" style="border-color:#1a1a28">
+      <div class="rounded-2xl border flex flex-col" style="background:#111118;border-color:var(--border);height:600px">
+        <div class="px-4 py-3 border-b shrink-0" style="border-color:var(--border)">
           <div class="text-sm font-semibold text-white">Arquivos de Log</div>
         </div>
-        <div class="overflow-y-auto flex-1 divide-y" style="border-color:#1a1a28;min-height:0">
+        <div class="overflow-y-auto flex-1 divide-y" style="border-color:var(--border);min-height:0">
           <button
             class="w-full text-left px-4 py-3 transition-colors hover:bg-white/5"
             style={isSelected(null)
-              ? 'background:rgba(124,106,245,0.12);border-left:2px solid #7c6af5'
+              ? 'background:rgba(124,106,245,0.12);border-left:2px solid var(--accent)'
               : 'border-left:2px solid transparent'}
             onclick={() => loadFile(null)}
           >
-            <div class="text-xs font-semibold" style={isSelected(null) ? 'color:#9d8eff' : 'color:#e0e0e8'}>Hoje</div>
+            <div class="text-xs font-semibold" style={isSelected(null) ? 'color:var(--accent-hi)' : 'color:#e0e0e8'}>Hoje</div>
             <div class="text-2xs mt-0.5" style="color:#5a5a78">{todayName()}</div>
           </button>
           {#if files.length === 0}
@@ -330,11 +330,11 @@
               <button
                 class="w-full text-left px-4 py-3 transition-colors hover:bg-white/5"
                 style={isSelected(f)
-                  ? 'background:rgba(124,106,245,0.1);border-left:2px solid #7c6af5'
+                  ? 'background:rgba(124,106,245,0.1);border-left:2px solid var(--accent)'
                   : 'border-left:2px solid transparent'}
                 onclick={() => loadFile(f.name)}
               >
-                <div class="text-xs font-medium" style={isSelected(f) ? 'color:#9d8eff' : 'color:#c0c0d0'}>{fileLabel(f)}</div>
+                <div class="text-xs font-medium" style={isSelected(f) ? 'color:var(--accent-hi)' : 'color:#c0c0d0'}>{fileLabel(f)}</div>
                 <div class="text-2xs mt-0.5" style="color:#5a5a78">{fmtBytes(f.size)}</div>
               </button>
             {/each}

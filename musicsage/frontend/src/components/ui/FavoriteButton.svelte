@@ -47,7 +47,7 @@
   <button
     type="button"
     class="leading-none transition-colors text-sm"
-    style="color: {starred ? '#ef4444' : '#5a5a78'}"
+    style="color: {starred ? 'var(--danger)' : '#5a5a78'}"
     aria-pressed={starred}
     aria-label={starred ? `Desfavoritar ${title || artist}` : `Favoritar ${title || artist}`}
     title={starred ? 'Remover dos favoritos' : 'Favoritar'}

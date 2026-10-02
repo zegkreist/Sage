@@ -4,10 +4,10 @@
 
 <section
   class="rounded-2xl border transition-all duration-200 overflow-hidden {cls}"
-  style="background: #111118; border-color: #1a1a28;"
+  style="background: #111118; border-color: var(--border);"
 >
   {#if title}
-    <div class="flex items-center justify-between px-5 py-4" style="border-bottom: 1px solid #1a1a28;">
+    <div class="flex items-center justify-between px-5 py-4" style="border-bottom: 1px solid var(--border);">
       <div>
         <h2 class="text-sm font-semibold text-white tracking-tight">{title}</h2>
         {#if subtitle}

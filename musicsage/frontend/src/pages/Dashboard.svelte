@@ -261,142 +261,38 @@
     </div>
   {/if}
 
-  <!-- ── 3. Retrospectiva ─────────────────────────────────── -->
-  <SectionBox noPad title="Retrospectiva">
+  <!-- ── 3. Retrospectiva (atalho para a tela cheia) ────────── -->
+  <SectionBox title="Retrospectiva"
+              subtitle={periodLabel[period]} >
     {#snippet actions()}
-      <div class="flex gap-1 p-1 rounded-lg" style="background:#0a0a0f">
-        {#each ['week','month','year'] as p}
-          <button
-            class="px-3 py-1 rounded-md text-2xs font-semibold transition-all"
-            style={period === p
-              ? 'background:rgba(124,106,245,0.18);color:#9d8eff;border:1px solid rgba(124,106,245,0.25)'
-              : 'color:#5a5a78;border:1px solid transparent'}
-            onclick={() => period = p}
-          >{periodLabel[p]}</button>
-        {/each}
-      </div>
+      <Button size="xs" variant="secondary" onclick={() => navigate('rewind?period=' + period)}>
+        Abrir em tela cheia ↗
+      </Button>
     {/snippet}
-
     <div class="px-5 pb-5 pt-1">
       {#if loadingMetrics}
-        <div class="flex items-center gap-2 py-8"><Spinner size="sm" /><span class="text-2xs" style="color:#5a5a78">Carregando…</span></div>
-      {:else if metrics}
-        <!-- Summary bar -->
-        {#if metrics.summary}
-          <div class="flex flex-wrap gap-6 mb-5 px-1 pb-4 border-b" style="border-color:#1e1e2e">
-            <div>
-              <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Reproduções</div>
-              <div class="text-base font-bold text-white">{fmt(metrics.summary.totalPlays ?? 0)}</div>
-            </div>
-            <div>
-              <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Horas ouvidas</div>
-              <div class="text-base font-bold text-white">{(metrics.summary.totalHours ?? 0).toFixed(1)} h</div>
-            </div>
-            <div>
-              <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Faixas únicas</div>
-              <div class="text-base font-bold text-white">{fmt(metrics.summary.uniqueTracks ?? 0)}</div>
-            </div>
-            <div>
-              <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Artistas únicos</div>
-              <div class="text-base font-bold text-white">{fmt(metrics.summary.uniqueArtists ?? 0)}</div>
-            </div>
-          </div>
-        {/if}
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-          <!-- Top Artistas -->
+        <div class="flex items-center gap-2 py-4"><Spinner size="sm" /><span class="text-2xs" style="color:#5a5a78">Carregando…</span></div>
+      {:else if metrics?.summary}
+        <div class="flex flex-wrap gap-6 px-1">
           <div>
-            <div class="flex items-center justify-between mb-3">
-              <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Top Artistas</div>
-              <button onclick={() => { shareTab = 'artists'; showShare = true; }}
-                style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:8px;color:#5a5a78;font-size:13px;line-height:1;transition:color .15s"
-                onmouseenter={(e) => e.currentTarget.style.color='#7c6af5'}
-                onmouseleave={(e) => e.currentTarget.style.color='#5a5a78'}>⬆ Story</button>
-            </div>
-            {#each (metrics.topArtists ?? []).slice(0,10) as a, i}
-              <div class="list-row flex items-center gap-3 py-2">
-                <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
-                {#if a.thumb}
-                  <img src="/api/library/thumb?path={encodeURIComponent(a.thumb)}" class="w-7 h-7 rounded object-cover shrink-0" alt="" />
-                {:else}
-                  <div class="w-7 h-7 rounded shrink-0 flex items-center justify-center text-xs" style="background:#1e1e2e;color:#5a5a78">◈</div>
-                {/if}
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm text-white truncate">{a.artist ?? '?'}</div>
-                  <div class="text-2xs truncate" style="color:#5a5a78">{a.analysisGenre ?? a.genres?.[0] ?? (a.totalMinutes ? a.totalMinutes + ' min' : '')}</div>
-                </div>
-                <span class="text-2xs stat-value" style="color:#5a5a78">{fmt(a.playCount ?? 0)}</span>
-              </div>
-            {/each}
+            <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Reproduções</div>
+            <div class="text-base font-bold text-white">{fmt(metrics.summary.totalPlays ?? 0)}</div>
           </div>
-
-          <!-- Top Faixas -->
           <div>
-            <div class="flex items-center justify-between mb-3">
-              <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Top Faixas</div>
-              <button onclick={() => { shareTab = 'tracks'; showShare = true; }}
-                style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:8px;color:#5a5a78;font-size:13px;line-height:1;transition:color .15s"
-                onmouseenter={(e) => e.currentTarget.style.color='#7c6af5'}
-                onmouseleave={(e) => e.currentTarget.style.color='#5a5a78'}>⬆ Story</button>
-            </div>
-            {#each (metrics.topTracks ?? []).slice(0,10) as t, i}
-              <div class="list-row flex items-center gap-3 py-2">
-                <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
-                {#if t.thumb}
-                  <img src="/api/library/thumb?path={encodeURIComponent(t.thumb)}" class="w-7 h-7 rounded object-cover shrink-0" alt="" />
-                {:else}
-                  <div class="w-7 h-7 rounded shrink-0 flex items-center justify-center text-xs" style="background:#1e1e2e;color:#5a5a78">♪</div>
-                {/if}
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm text-white truncate">{t.title ?? '?'}</div>
-                  {#if t.artist}<div class="text-2xs truncate" style="color:#5a5a78">{t.artist}</div>{/if}
-                </div>
-                <span class="text-2xs stat-value" style="color:#5a5a78">{fmt(t.playCount ?? 0)}</span>
-              </div>
-            {/each}
+            <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Horas ouvidas</div>
+            <div class="text-base font-bold text-white">{(metrics.summary.totalHours ?? 0).toFixed(1)} h</div>
           </div>
-
-          <!-- Top Gêneros -->
-          {#if metrics.topAnalysisGenres?.length >= 3}
-            <div>
-              <div class="flex items-center gap-2 mb-3">
-                <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Gêneros</div>
-                <span class="text-2xs px-1.5 py-px rounded" style="background:rgba(29,185,84,0.1);color:#1db954;border:1px solid rgba(29,185,84,0.2)">da análise</span>
-              </div>
-              {#each (metrics.topAnalysisGenres ?? []).slice(0,10) as g, i}
-                <div class="list-row flex items-center gap-3 py-2">
-                  <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
-                  <span class="text-sm flex-1 truncate text-white">{g.genre ?? g.name ?? '?'}</span>
-                  <div class="text-right shrink-0">
-                    <div class="text-2xs stat-value" style="color:#5a5a78">{fmt(g.playCount ?? 0)} plays</div>
-                    {#if g.trackCount}<div class="text-2xs" style="color:#3a3a58">{g.trackCount} faixas</div>{/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div>
-              <div class="flex items-center gap-2 mb-3">
-                <div class="text-2xs font-semibold uppercase tracking-wider" style="color:#5a5a78">Gêneros</div>
-                <span class="text-2xs px-1.5 py-px rounded" style="color:#3a3a58;border:1px solid #1e1e2e">Plex tags</span>
-              </div>
-              {#each (metrics.topGenres ?? []).slice(0,10) as g, i}
-                <div class="list-row flex items-center gap-3 py-2">
-                  <span class="rank-chip {i===0?'top1':i===1?'top2':i===2?'top3':''}">{i+1}</span>
-                  <span class="text-sm flex-1 truncate text-white">{g.genre ?? g.name ?? '?'}</span>
-                  <div class="text-right shrink-0">
-                    <div class="text-2xs stat-value" style="color:#5a5a78">{fmt(g.playCount ?? 0)} plays</div>
-                    {#if g.trackCount}<div class="text-2xs" style="color:#3a3a58">{g.trackCount} faixas</div>{/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
-
+          <div>
+            <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Faixas únicas</div>
+            <div class="text-base font-bold text-white">{fmt(metrics.summary.uniqueTracks ?? 0)}</div>
+          </div>
+          <div>
+            <div class="text-2xs uppercase tracking-wider mb-0.5" style="color:#5a5a78">Artistas únicos</div>
+            <div class="text-base font-bold text-white">{fmt(metrics.summary.uniqueArtists ?? 0)}</div>
+          </div>
         </div>
       {:else}
-        <div class="py-8 text-center text-sm" style="color:#5a5a78">Selecione um período acima</div>
+        <div class="py-4 text-center text-sm" style="color:#5a5a78">Selecione um período acima</div>
       {/if}
     </div>
   </SectionBox>
@@ -481,10 +377,11 @@
                 <MoodBar label="Energia"       value={+(moodDay.avgEnergy ?? 0).toFixed(1)} />
                 <MoodBar label="Positividade"  value={+(moodDay.avgValence ?? 0).toFixed(1)} />
                 <MoodBar label="Dançabilidade" value={+(moodDay.avgDanceability ?? 0).toFixed(1)} />
+            <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
               </div>
             </div>
           {:else}
-            <div class="flex flex-col items-center justify-center py-6" style="color:#3a3a58">
+            <div class="flex flex-col items-center justify-center py-6" style="color:var(--muted)">
               <div class="text-xl mb-1">◈</div>
               <div class="text-2xs">Toque músicas hoje para ver o mood</div>
             </div>
@@ -518,7 +415,7 @@
       {/snippet}
 
       {#if weeklyBusy}
-        <div class="flex items-center gap-2 text-sm" style="color:#8888a8">
+        <div class="flex items-center gap-2 text-sm" style="color:var(--dim)">
           <Spinner size="sm" />
           {weeklyStage || 'Gerando…'}
         </div>
@@ -531,17 +428,17 @@
             </button>
             <div class="text-2xs mt-0.5" style="color:#5a5a78">
               {weekly.lastPlaylist.trackCount} faixas · {relTime(Math.round(weekly.lastPlaylist.createdAt / 1000))}
-              {#if !weekly.lastPlaylist.plexId} · <span style="color:#f59e0b">não sincronizada com o Plex</span>{/if}
+              {#if !weekly.lastPlaylist.plexId} · <span style="color:var(--warn)">não sincronizada com o Plex</span>{/if}
             </div>
           </div>
         </div>
       {:else}
-        <div class="text-sm" style="color:#8888a8">Nenhuma descoberta gerada ainda</div>
+        <div class="text-sm" style="color:var(--dim)">Nenhuma descoberta gerada ainda</div>
       {/if}
 
       {#if weekly.lastError}
         <div class="mt-3 rounded-xl px-3 py-2 text-2xs border"
-             style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#ef4444">
+             style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:var(--danger)">
           Última tentativa falhou: {weekly.lastError.message}
         </div>
       {/if}
@@ -557,13 +454,13 @@
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 px-5 pt-1 pb-5">
         {#each discoveries as t}
           <div class="rounded-xl p-3 border transition-all duration-150 hover:border-accent/25"
-               style="background:#16161f;border-color:#1e1e2e">
+               style="background:var(--surface2);border-color:#1e1e2e">
             <div class="text-sm font-medium text-white truncate leading-snug">{t.title ?? '—'}</div>
             <div class="text-2xs truncate mt-0.5" style="color:#5a5a78">{t.artist ?? ''}</div>
             <div class="flex items-center gap-1.5 mt-2 flex-wrap">
               {#if t.energy != null}
                 <span class="text-2xs font-semibold px-1.5 py-px rounded"
-                      style="background:rgba(124,106,245,0.1);color:#9d8eff">⚡ {(+t.energy).toFixed(0)}</span>
+                      style="background:rgba(124,106,245,0.1);color:var(--accent-hi)">⚡ {(+t.energy).toFixed(0)}</span>
               {/if}
               {#if t.mood}
                 {@const mc = moodColor(t.mood)}
@@ -572,7 +469,7 @@
               {/if}
               {#if t.subgenre}
                 <span class="text-2xs px-1.5 py-px rounded truncate"
-                      style="background:rgba(56,189,248,0.08);color:#38bdf8;max-width:100%">{t.subgenre}</span>
+                      style="background:rgba(56,189,248,0.08);color:var(--info);max-width:100%">{t.subgenre}</span>
               {/if}
             </div>
           </div>
@@ -619,11 +516,12 @@
         <span class="text-2xs" style="color:#5a5a78">Cache de análise · toda a biblioteca</span>
       {/snippet}
       <div class="px-5 pt-2 pb-5">
+            <!-- TODO: #3a3a58 mapeado para var(--muted) (token mais próximo disponível) -->
         <div class="space-y-2">
           {#each subgenreDistrib as sg, i}
             {@const maxCount = subgenreDistrib[0]?.count ?? 1}
             {@const barPct = Math.round(sg.count / maxCount * 100)}
-            {@const barColor = i === 0 ? '#7c6af5' : i === 1 ? '#1db954' : i === 2 ? '#38bdf8' : i < 5 ? '#f59e0b' : '#3a3a58'}
+            {@const barColor = i === 0 ? 'var(--accent)' : i === 1 ? '#1db954' : i === 2 ? 'var(--info)' : i < 5 ? 'var(--warn)' : 'var(--muted)'}
             <div class="flex items-center gap-3">
               <div class="text-2xs text-right shrink-0" style="width:3.5rem;color:#5a5a78">{sg.pct}%</div>
               <div class="flex-1">
@@ -631,7 +529,7 @@
                   <span class="text-xs text-white truncate" style="max-width:70%">{sg.name}</span>
                   <span class="text-2xs" style="color:#5a5a78">{sg.count} faixas</span>
                 </div>
-                <div class="h-1 rounded-full" style="background:#1c1c28">
+                <div class="h-1 rounded-full" style="background:var(--surface3)">
                   <div class="h-1 rounded-full transition-all duration-500"
                        style="width:{barPct}%;background:{barColor};box-shadow:0 0 4px {barColor}55"></div>
                 </div>

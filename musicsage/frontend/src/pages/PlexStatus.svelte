@@ -12,9 +12,54 @@
 
   let fetchError = $state(null);
 
+  // ─── Saúde dos Serviços (F8) ──────────────────────────────────────────────
+  let health = $state([]);
+
+  const HEALTH_TARGETS = [
+    { name: 'API MusicSage',   desc: 'Servidor backend',               path: '/health' },
+    { name: 'TideCaller',      desc: 'Token Tidal',                    path: '/tools/tidecaller/token/check' },
+    { name: 'Letras',          desc: 'Cobertura da biblioteca',        path: '/lyrics/stats' },
+    { name: 'Servidor de Mídia', desc: 'Conectividade (Plex/provider)', path: '/plex/status' },
+  ];
+
+  async function checkHealth() {
+    health = HEALTH_TARGETS.map(t => ({ ...t, state: 'checking', detail: 'Verificando…' }));
+    await Promise.all(HEALTH_TARGETS.map(async (t, i) => {
+      try {
+        const r = await api('GET', t.path);
+        let state = 'green', detail = 'OK';
+        if (t.path === '/tools/tidecaller/token/check') {
+          state = r.valid ? 'green' : 'red';
+          detail = r.valid ? 'Token válido' : (r.message || 'Token inválido');
+        } else if (t.path === '/lyrics/stats') {
+          state = 'green';
+          detail = `${r.withLyrics ?? 0}/${r.total ?? 0} com letras`;
+        } else if (t.path === '/plex/status') {
+          state = r.valid ? 'green' : 'red';
+          detail = r.valid ? `Conectado (${r.type ?? 'plex'})` : (r.error || 'Falha na conexão');
+        } else if (r.status !== 'ok') {
+          state = 'yellow';
+          detail = `status: ${r.status}`;
+        }
+        health[i] = { ...health[i], state, detail };
+      } catch (e) {
+        // 503 = dependência indisponível (amarelo); resto = vermelho
+        health[i] = { ...health[i], state: /503|unavailable|não disponível/i.test(e.message) ? 'yellow' : 'red', detail: e.message };
+      }
+    }));
+  }
+
+  const HEALTH_STYLE = {
+    green:    { color: '#1db954', bg: '#1db95418', icon: '✓', label: 'Operacional' },
+    yellow:   { color: 'var(--warn)',    bg: '#f59e0b18', icon: '!', label: 'Instável' },
+    red:      { color: 'var(--danger)',  bg: '#ef444418', icon: '✕', label: 'Indisponível' },
+    checking: { color: 'var(--muted)',   bg: '#5a5a7818', icon: '…', label: 'Verificando' },
+  };
+
   onMount(() => {
     console.log('[PlexStatus] onMount — chamando checkStatus()');
     checkStatus();
+    checkHealth();
   });
 
   async function checkStatus() {
@@ -106,6 +151,35 @@
     </div>
   </div>
 
+  <!-- ── Saúde dos Serviços (F8) ───────────────────────────────────────── -->
+  <section>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-white tracking-tight">Saúde dos Serviços</h2>
+      <Button variant="secondary" size="sm" onclick={checkHealth}>
+        Verificar
+      </Button>
+    </div>
+    <div class="grid grid-cols-1 gap-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+      {#each health as h (h.path)}
+        {@const st = HEALTH_STYLE[h.state] ?? HEALTH_STYLE.checking}
+        <div class="rounded-xl p-4 flex items-start gap-3" style="background:var(--surface2); border:1px solid var(--border);">
+          <div
+            class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+            style="background:{st.bg}; color:{st.color};"
+            aria-label={st.label}
+          >{st.icon}</div>
+          <div class="min-w-0">
+            <div class="text-xs font-semibold text-white truncate">{h.name}</div>
+            <div class="text-2xs text-muted mt-0.5">{h.desc}</div>
+            <div class="text-2xs mt-1.5 font-medium truncate" style="color:{st.color}" title={h.detail}>
+              {h.detail}
+            </div>
+          </div>
+        </div>
+      {/each}
+    </div>
+  </section>
+
   {#if loading && !status}
     <div class="flex items-center justify-center py-16 flex-col gap-3">
       <Spinner size="lg" />
@@ -114,7 +188,7 @@
 
   {:else if fetchError && !status}
     <div class="px-4 py-5 rounded-xl text-sm" style="background:#1f0d0d; border:1px solid #4a1a1a;">
-      <div class="font-semibold" style="color:#f87171">Erro ao carregar</div>
+      <div class="font-semibold" style="color:var(--danger)">Erro ao carregar</div>
       <div class="text-muted text-xs mt-1">{fetchError}</div>
       <div class="mt-3">
         <Button variant="danger" size="sm" onclick={checkStatus}>Tentar novamente</Button>
@@ -133,12 +207,12 @@
       <!-- Indicador -->
       <div
         class="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"
-        style="{status.valid ? 'background:#1db95422;' : 'background:#f8717122;'}"
+        style="{status.valid ? 'background:#1db95422;' : 'background:var(--danger)22;'}"
       >
         {status.valid ? '✓' : '✕'}
       </div>
       <div class="flex-1 min-w-0">
-        <div class="font-semibold text-sm" style="color:{status.valid ? '#1db954' : '#f87171'}">
+        <div class="font-semibold text-sm" style="color:{status.valid ? '#1db954' : 'var(--danger)'}">
           {status.valid ? 'Conexão estabelecida' : 'Falha na conexão'}
         </div>
         <div class="text-xs text-muted mt-0.5 truncate">
@@ -152,7 +226,7 @@
         class="shrink-0 px-3 py-1 rounded-full text-2xs font-medium"
         style="{status.tokenPresent
           ? 'background:#1db95418; color:#1db954; border:1px solid #1db95430;'
-          : 'background:#f8717118; color:#f87171; border:1px solid #f8717130;'}"
+          : 'background:var(--danger)18; color:var(--danger); border:1px solid var(--danger)30;'}"
       >
         {status.tokenPresent ? 'Token presente' : 'Sem token'}
       </div>
@@ -166,7 +240,7 @@
         <div class="space-y-3">
           {@render InfoRow('URL do Plex', status.url, true)}
           {@render InfoRow('Token', status.tokenMasked, true)}
-          {@render InfoRow('Token válido', status.valid ? 'Sim' : 'Não', false, status.valid ? '#1db954' : '#f87171')}
+          {@render InfoRow('Token válido', status.valid ? 'Sim' : 'Não', false, status.valid ? '#1db954' : 'var(--danger)')}
         </div>
       </Card>
 
@@ -186,7 +260,7 @@
 
     <!-- Dica quando sem PLEX_CONFIG_DIR -->
     {#if !status.valid || !status.tokenPresent}
-      <div class="px-4 py-3 rounded-lg text-xs text-muted" style="background:#111118; border:1px solid #1a1a28;">
+      <div class="px-4 py-3 rounded-lg text-xs text-muted" style="background:#111118; border:1px solid var(--border);">
         <span class="text-soft font-medium">Dica: </span>
         O botão <strong>Recarregar Token</strong> relê o token diretamente do arquivo
         <code class="text-accent">Preferences.xml</code> do Plex (requer
@@ -201,16 +275,16 @@
       <div class="px-4 py-3 rounded-xl border text-sm space-y-1" style="background:#111118; border-color:#1e1e2e;">
         <div class="font-semibold text-white mb-2">Resultado da correção de IDs</div>
         <div class="grid grid-cols-3 gap-3 text-center">
-          <div class="rounded-lg py-2" style="background:#16161f">
+          <div class="rounded-lg py-2" style="background:var(--surface2)">
             <div class="text-lg font-bold" style="color:#1db954">{remapResult.remapped}</div>
             <div class="text-2xs text-muted">Corrigidos</div>
           </div>
-          <div class="rounded-lg py-2" style="background:#16161f">
-            <div class="text-lg font-bold" style="color:#9d8eff">{remapResult.unchanged}</div>
+          <div class="rounded-lg py-2" style="background:var(--surface2)">
+            <div class="text-lg font-bold" style="color:var(--accent-hi)">{remapResult.unchanged}</div>
             <div class="text-2xs text-muted">Inalterados</div>
           </div>
-          <div class="rounded-lg py-2" style="background:#16161f">
-            <div class="text-lg font-bold" style="color:#f59e0b">{remapResult.notFound}</div>
+          <div class="rounded-lg py-2" style="background:var(--surface2)">
+            <div class="text-lg font-bold" style="color:var(--warn)">{remapResult.notFound}</div>
             <div class="text-2xs text-muted">Deletados</div>
           </div>
         </div>
@@ -219,7 +293,7 @@
             <summary class="text-2xs text-muted cursor-pointer">Ver faixas corrigidas</summary>
             <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
               {#each remapResult.details.filter(d => d.status === 'remapped') as d}
-                <div class="text-2xs px-2 py-1 rounded" style="background:#1a1a28">
+                <div class="text-2xs px-2 py-1 rounded" style="background:var(--surface)">
                   <span class="text-white">{d.title}</span>
                   <span class="text-muted ml-1">— {d.artist}</span>
                   <span class="ml-1 font-mono" style="color:#5a5a78">{d.oldKey} → {d.newKey}</span>
@@ -233,10 +307,10 @@
             <summary class="text-2xs text-muted cursor-pointer">Ver faixas deletadas do cache</summary>
             <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
               {#each remapResult.details.filter(d => d.status === 'deleted') as d}
-                <div class="text-2xs px-2 py-1 rounded" style="background:#1a1a28">
+                <div class="text-2xs px-2 py-1 rounded" style="background:var(--surface)">
                   <span class="text-white">{d.title}</span>
                   <span class="text-muted ml-1">— {d.artist}</span>
-                  <span class="ml-1 font-mono" style="color:#f59e0b">{d.oldKey}</span>
+                  <span class="ml-1 font-mono" style="color:var(--warn)">{d.oldKey}</span>
                 </div>
               {/each}
             </div>
