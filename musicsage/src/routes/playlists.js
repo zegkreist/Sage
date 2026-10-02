@@ -24,25 +24,55 @@ function _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved) {
     });
 }
 
+/**
+ * Fluxo comum dos 4 endpoints de criação de playlist:
+ * roda jobRunner em background (se async + disponível) OU gera/salva/sincroniza
+ * e responde — comportamento externo idêntico ao dos endpoints originais.
+ *
+ * builderFn: async ({ progress }) => playlist (ainda não salva)
+ * opts:
+ *   jobLabel   — se presente, habilita o caminho async (req.body.async + jobRunner)
+ *                e é usado como descrição do job
+ *   errorLabel — se presente, loga `errorLabel erro: <msg>` antes do 500
+ */
+async function createPlaylist(builderFn, req, res, { jobLabel, errorLabel } = {}) {
+  if (jobLabel && req.body?.async && jobRunner) {
+    const job = jobRunner.start("playlist", jobLabel, async ({ progress }) => {
+      const playlist = await builderFn({ progress });
+      const saved = playlistBuilder.save(playlist);
+      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
+      return saved;
+    });
+    return res.status(202).json({ jobId: job.id });
+  }
+  try {
+    const playlist = await builderFn({});
+    const saved = playlistBuilder.save(playlist);
+    _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
+    res.status(201).json(saved);
+  } catch (err) {
+    if (errorLabel) {
+      import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `${errorLabel} erro: ${err.message}`));
+    }
+    res.status(500).json({ error: err.message });
+  }
+}
+
 export function playlistsRouter(router, { playlistBuilder, mediaPlaylists, analysisCache, jobRunner, favoritesService } = {}) {
   // POST /api/playlists/generate
-  router.post("/playlists/generate", async (req, res) => {
+  router.post("/playlists/generate", (req, res) => {
     const { name, mood, genre, energy, size } = req.body || {};
-    try {
-      const playlist = await playlistBuilder.generate({
+    return createPlaylist(
+      () => playlistBuilder.generate({
         name,
         mood,
         genre,
         energy,
         size: size ? parseInt(size, 10) : 10,
-      });
-      const saved = playlistBuilder.save(playlist);
-      // Tenta sincronizar com Plex em background (não bloqueia a resposta)
-      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-      res.status(201).json(saved);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+      }),
+      req,
+      res
+    );
   });
 
   // GET /api/playlists
@@ -64,23 +94,13 @@ export function playlistsRouter(router, { playlistBuilder, mediaPlaylists, analy
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return res.status(400).json({ error: "Campo 'prompt' é obrigatório" });
     }
-    if (req.body?.async && jobRunner) {
-      const job = jobRunner.start("playlist", `prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
-        const playlist = await playlistBuilder.generateFromPrompt(prompt.trim(), { onProgress: progress });
-        const saved = playlistBuilder.save(playlist);
-        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-        return saved;
-      });
-      return res.status(202).json({ jobId: job.id });
-    }
-    try {
-      const playlist = await playlistBuilder.generateFromPrompt(prompt.trim());
-      const saved = playlistBuilder.save(playlist);
-      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-      res.status(201).json(saved);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+    return createPlaylist(
+      ({ progress }) =>
+        playlistBuilder.generateFromPrompt(prompt.trim(), progress ? { onProgress: progress } : undefined),
+      req,
+      res,
+      { jobLabel: `prompt: ${prompt.trim().slice(0, 60)}` }
+    );
   });
 
   // POST /api/playlists/from-cache-prompt — gera playlist via LLM usando perfis de áudio do cache
@@ -99,24 +119,20 @@ export function playlistsRouter(router, { playlistBuilder, mediaPlaylists, analy
       if (!favoritesService) return res.status(503).json({ error: "FavoritesService não disponível" });
       opts.favoriteKeys = favoritesService.starredKeys();
     }
-    if (req.body?.async && jobRunner) {
-      const job = jobRunner.start("playlist", `cache-prompt: ${prompt.trim().slice(0, 60)}`, async ({ progress }) => {
-        const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, { ...opts, onProgress: progress });
-        const saved = playlistBuilder.save(playlist);
-        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-        return saved;
-      });
-      return res.status(202).json({ jobId: job.id });
-    }
-    try {
-      const playlist = await playlistBuilder.generateFromCacheWithPrompt(prompt.trim(), analysisCache, opts);
-      const saved    = playlistBuilder.save(playlist);
-      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-      res.status(201).json(saved);
-    } catch (err) {
-      import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-prompt erro: ${err.message}`));
-      res.status(500).json({ error: err.message });
-    }
+    return createPlaylist(
+      ({ progress }) =>
+        playlistBuilder.generateFromCacheWithPrompt(
+          prompt.trim(),
+          analysisCache,
+          progress ? { ...opts, onProgress: progress } : opts
+        ),
+      req,
+      res,
+      {
+        jobLabel: `cache-prompt: ${prompt.trim().slice(0, 60)}`,
+        errorLabel: "from-cache-prompt",
+      }
+    );
   });
 
   // POST /api/playlists/from-cache-track — gera playlist "Radio" a partir de uma faixa analisada
@@ -148,33 +164,22 @@ export function playlistsRouter(router, { playlistBuilder, mediaPlaylists, analy
       maxPerArtist:  maxPerArtist  != null ? Math.max(1, parseInt(maxPerArtist,  10)) : 3,
       discoveryRatio: discoveryRatio != null ? Math.min(1, Math.max(0, parseFloat(discoveryRatio))) : 0.3,
     };
-    if (req.body?.async && jobRunner) {
-      const job = jobRunner.start("playlist", `radio: ${cached.title}`, async ({ progress }) => {
-        const playlist = await playlistBuilder.generateFromCacheWithTrack(
-          cached.analysis, cached.title, ratingKey, analysisCache,
-          { ...opts, onProgress: progress }
-        );
-        const saved = playlistBuilder.save(playlist);
-        _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-        return saved;
-      });
-      return res.status(202).json({ jobId: job.id });
-    }
-    try {
-      const playlist = await playlistBuilder.generateFromCacheWithTrack(
-        cached.analysis,
-        cached.title,
-        ratingKey,
-        analysisCache,
-        opts
-      );
-      const saved = playlistBuilder.save(playlist);
-      _trySyncToMediaServer(mediaPlaylists, playlistBuilder, saved);
-      res.status(201).json(saved);
-    } catch (err) {
-      import('../logger.js').then(({ logger }) => logger.error('PLAYLIST', `from-cache-track erro: ${err.message}`));
-      res.status(500).json({ error: err.message });
-    }
+    return createPlaylist(
+      ({ progress }) =>
+        playlistBuilder.generateFromCacheWithTrack(
+          cached.analysis,
+          cached.title,
+          ratingKey,
+          analysisCache,
+          progress ? { ...opts, onProgress: progress } : opts
+        ),
+      req,
+      res,
+      {
+        jobLabel: `radio: ${cached.title}`,
+        errorLabel: "from-cache-track",
+      }
+    );
   });
 
   // PATCH /api/playlists/:id — atualiza localmente e sincroniza com Plex se já estiver lá

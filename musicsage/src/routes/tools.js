@@ -587,6 +587,48 @@ function withSearchTimeout(promise, label = "") {
   ]);
 }
 
+/**
+ * Fábrica comum para as 3 rotas de busca de torrent do Stormbringer
+ * (music / movie / series) — comportamento externo idêntico ao das rotas originais.
+ * config:
+ *   path       — caminho público da rota
+ *   logLabel   — prefixo usado nos logs ("Stormbringer search movie", etc.)
+ *   errorLabel — sufixo usado no log de erro ("movie search error", etc.)
+ *   validate(body, res) — retorna false (após responder 400) se o body for inválido
+ *   search(ts, body)    — Promise com os resultados brutos
+ *   label(body)         — label da busca para o timeout/logs
+ *   logDetail?(body)    — detalhe da linha de log inicial (default: label(body))
+ *   onResults?(results, body) — hook opcional pós-busca (ex: log de resumo da busca musical)
+ */
+function registerTorrentSearch(router, { path, logLabel, errorLabel, validate, search, label, logDetail, onResults }) {
+  router.post(path, async (req, res) => {
+    if (!validate(req.body || {}, res)) return;
+    try {
+      const body = req.body || {};
+      logger.info("SERVER", `${logLabel}: ${logDetail ? logDetail(body) : label(body)}`);
+      const ts = await getTorrentSearch();
+      const results = await withSearchTimeout(search(ts, body), label(body));
+      if (onResults) onResults(results, body);
+      const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
+      res.json(
+        results.slice(0, limit).map((r) => ({
+          title:    r.title    || "",
+          size:     r.size     || "–",
+          seeds:    typeof r.seeds === "number" ? r.seeds : 0,
+          peers:    typeof r.peers === "number" ? r.peers : 0,
+          provider: r.provider || "–",
+          magnet:   r.magnet   || null,
+          link:     r.link     || null,
+        }))
+      );
+    } catch (err) {
+      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
+      logger.error("SERVER", `Stormbringer ${errorLabel}: ${JSON.stringify(detail)}`);
+      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
+    }
+  });
+}
+
 export function toolsRouter(router, { hermesInbox } = {}) {
   // Conclui o pedido do Hermes quando o download que ele originou termina —
   // é o que faz a linha sair do requests.md sozinha.
@@ -600,97 +642,74 @@ export function toolsRouter(router, { hermesInbox } = {}) {
   };
 
   // ── POST /api/tools/stormbringer/search ──────────────────────────────────
-  router.post("/tools/stormbringer/search", async (req, res) => {
-    const { artist, album } = req.body || {};
-    if (!artist?.trim()) return res.status(400).json({ error: "'artist' é obrigatório" });
-
-    try {
-      logger.info("SERVER", `Stormbringer busca música: artista="${artist}" álbum="${album || "(qualquer)"}"`);
-      const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchMusic(artist.trim(), album?.trim() || null), `music: ${artist}`);
-
+  registerTorrentSearch(router, {
+    path: "/tools/stormbringer/search",
+    logLabel: "Stormbringer busca música",
+    errorLabel: "search error",
+    validate: (body, res) => {
+      if (!body.artist?.trim()) {
+        res.status(400).json({ error: "'artist' é obrigatório" });
+        return false;
+      }
+      return true;
+    },
+    label: (body) => `music: ${body.artist}`,
+    logDetail: (body) => `artista="${body.artist}" álbum="${body.album || "(qualquer)"}"`,
+    search: (ts, body) =>
+      ts.searchMusic(body.artist.trim(), body.album?.trim() || null),
+    onResults: (results, body) => {
       if (results.length) {
         const best = results[0];
-        logger.info("SERVER", `Stormbringer → ${results.length} resultado(s); melhor: "${best.title}" (${best.seeds} seeds, ${best.provider})`);
+        logger.info('SERVER', `Stormbringer → ${results.length} resultado(s); melhor: "${best.title}" (${best.seeds} seeds, ${best.provider})`);
       } else {
-        logger.warn("SERVER", `Stormbringer → 0 resultados para "${artist}${album ? " " + album : ""}". Ou nenhum indexer do Jackett tem esse álbum, ou os indexers estão com erro — confira as linhas [STORMBRINGER] "Jackett retornou N resultados (M indexers)" acima.`);
+        logger.warn('SERVER', `Stormbringer → 0 resultados para "${body.artist}${body.album ? " " + body.album : ""}". Ou nenhum indexer do Jackett tem esse álbum, ou os indexers estão com erro — confira as linhas [STORMBRINGER] "Jackett retornou N resultados (M indexers)" acima.`);
       }
-
-      const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
-      res.json(
-        results.slice(0, limit).map((r) => ({
-          title:    r.title    || "",
-          size:     r.size     || "–",
-          seeds:    typeof r.seeds === "number" ? r.seeds : 0,
-          peers:    typeof r.peers === "number" ? r.peers : 0,
-          provider: r.provider || "–",
-          magnet:   r.magnet   || null,
-          link:     r.link     || null,
-        }))
-      );
-    } catch (err) {
-      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
-      logger.error("SERVER", `Stormbringer search error: ${JSON.stringify(detail)}`);
-      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
-    }
+    },
   });
 
   // ── POST /api/tools/stormbringer/search/movie ────────────────────────────
   // Body: { title, year? }
-  router.post("/tools/stormbringer/search/movie", async (req, res) => {
-    const { title, year } = req.body || {};
-    if (!title?.trim()) return res.status(400).json({ error: "'title' é obrigatório" });
-    try {
-      logger.info("SERVER", `Stormbringer search movie: "${title}" ${year || ""}`);
-      const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchMovies(title.trim(), year ? parseInt(year) : null), `movie: ${title}`);
-      const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
-      res.json(
-        results.slice(0, limit).map((r) => ({
-          title:    r.title    || "",
-          size:     r.size     || "–",
-          seeds:    typeof r.seeds === "number" ? r.seeds : 0,
-          peers:    typeof r.peers === "number" ? r.peers : 0,
-          provider: r.provider || "–",
-          magnet:   r.magnet   || null,
-          link:     r.link     || null,
-        }))
-      );
-    } catch (err) {
-      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
-      logger.error("SERVER", `Stormbringer movie search error: ${JSON.stringify(detail)}`);
-      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
-    }
+  registerTorrentSearch(router, {
+    path: "/tools/stormbringer/search/movie",
+    logLabel: "Stormbringer search movie",
+    errorLabel: "movie search error",
+    validate: (body, res) => {
+      if (!body.title?.trim()) {
+        res.status(400).json({ error: "'title' é obrigatório" });
+        return false;
+      }
+      return true;
+    },
+    label: (body) => `movie: ${body.title}`,
+    logDetail: (body) => `"${body.title}" ${body.year || ""}`,
+    search: (ts, body) =>
+      ts.searchMovies(body.title.trim(), body.year ? parseInt(body.year) : null),
   });
 
   // ── POST /api/tools/stormbringer/search/series ───────────────────────────
   // Body: { title, season?, episode? }
-  router.post("/tools/stormbringer/search/series", async (req, res) => {
-    const { title, season, episode } = req.body || {};
-    if (!title?.trim()) return res.status(400).json({ error: "'title' é obrigatório" });
-    try {
-      const s = season  ? parseInt(season)  : null;
-      const e = episode ? parseInt(episode) : null;
-      logger.info("SERVER", `Stormbringer search series: "${title}" S${s ?? '?'}E${e ?? '?'}`);
-      const ts = await getTorrentSearch();
-      const results = await withSearchTimeout(ts.searchSeries(title.trim(), s, e), `series: ${title}`);
-      const limit = Math.min(parseInt(req.body?.limit) || 100, 200);
-      res.json(
-        results.slice(0, limit).map((r) => ({
-          title:    r.title    || "",
-          size:     r.size     || "–",
-          seeds:    typeof r.seeds === "number" ? r.seeds : 0,
-          peers:    typeof r.peers === "number" ? r.peers : 0,
-          provider: r.provider || "–",
-          magnet:   r.magnet   || null,
-          link:     r.link     || null,
-        }))
-      );
-    } catch (err) {
-      const detail = err.response?.data ?? err.cause ?? err.message ?? String(err);
-      logger.error("SERVER", `Stormbringer series search error: ${JSON.stringify(detail)}`);
-      res.status(500).json({ error: typeof detail === 'string' ? detail : JSON.stringify(detail) });
-    }
+  registerTorrentSearch(router, {
+    path: "/tools/stormbringer/search/series",
+    logLabel: "Stormbringer search series",
+    errorLabel: "series search error",
+    validate: (body, res) => {
+      if (!body.title?.trim()) {
+        res.status(400).json({ error: "'title' é obrigatório" });
+        return false;
+      }
+      return true;
+    },
+    label: (body) => {
+      const s = body.season ? parseInt(body.season) : null;
+      const e = body.episode ? parseInt(body.episode) : null;
+      return `series: ${body.title} S${s ?? '?'}E${e ?? '?'}`;
+    },
+    search: (ts, body) =>
+      ts.searchSeries(
+        body.title.trim(),
+        body.season ? parseInt(body.season) : null,
+        body.episode ? parseInt(body.episode) : null
+      ),
   });
 
   // ── GET /api/tools/stormbringer/feeds ────────────────────────────────────
