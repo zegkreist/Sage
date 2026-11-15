@@ -34,6 +34,11 @@ class DownloadManager extends EventEmitter {
     this.on("error", () => {});
     this._log = (level, msg) => console.log(`[${level.toUpperCase()}] ${msg}`);
     this.activeTorrents = new Map();
+
+    // Anti-seed: torrent concluído NÃO fica semeando pra sempre (satura a
+    // internet). Carência curta de seed pós-conclusão; 0 = parar imediatamente.
+    this.seedMinutes = Number(config.torrent?.seedMinutes ?? 2);
+    this._seedTimers = new Map(); // infoHash → setTimeout pendente
     this.metadataEnricher = new MetadataEnricher(config);
     this.stateFile = config.downloads?.stateFile || path.join(__dirname, "../.download-state.json");
 
@@ -280,6 +285,11 @@ class DownloadManager extends EventEmitter {
           this._log("error", `Falha ao organizar "${torrent.name}": ${err.message} — arquivos ficaram em ${downloadPath}`);
         }
 
+        // Anti-seed: após a organização (arquivos já prontos/idos), aguarda
+        // uma carência curta e DESTROI o torrent — sem isso o WebTorrent
+        // semeia indefinidamente e satura o upload da internet.
+        this._scheduleStopSeeding(torrentInfo);
+
         try {
           this.saveState();
           this.emit("completed", torrentInfo);
@@ -410,6 +420,12 @@ class DownloadManager extends EventEmitter {
    * Remove um torrent
    */
   removeTorrent(infoHash, deleteFiles = false) {
+    // Cancela agendamento anti-seed pendente, se houver
+    const pendingTimer = this._seedTimers.get(infoHash);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      this._seedTimers.delete(infoHash);
+    }
     const torrentInfo = this.activeTorrents.get(infoHash);
     if (torrentInfo && torrentInfo.torrent) {
       const result = torrentInfo.torrent.destroy({ destroyStore: deleteFiles });
@@ -626,6 +642,67 @@ class DownloadManager extends EventEmitter {
   }
 
   /**
+   * Agenda a parada do seeding de um torrent concluído.
+   *
+   * Carência de seedMinutes (padrão 2) após a conclusão — dá tempo do
+   * auto-Transporter (debounce 30s) mover os arquivos antes de derrubar o
+   * torrent. Depois disso destroy({ destroyStore: false }): desconecta todos
+   * os peers e para o upload, MAS preserva os arquivos no disco.
+   *
+   * O evento "completed" já foi emitido antes disso — o agendamento é pós-
+   * organização, então nem compete com o Transporter nem depende dele.
+   */
+  _scheduleStopSeeding(torrentInfo) {
+    const infoHash = torrentInfo.infoHash;
+    if (!infoHash) return;
+
+    // Cancela agendamento anterior (ex: torrent re-adicionado)
+    const prev = this._seedTimers.get(infoHash);
+    if (prev) clearTimeout(prev);
+
+    const ms = this.seedMinutes * 60_000;
+    if (ms <= 0) {
+      this._stopSeedingNow(torrentInfo);
+      return;
+    }
+
+    this._log("info", `Seed de "${torrentInfo.name ?? infoHash}" será encerrado em ${this.seedMinutes} min (anti-seed)`);
+    const timer = setTimeout(() => {
+      this._seedTimers.delete(infoHash);
+      this._stopSeedingNow(torrentInfo);
+    }, ms);
+    timer.unref?.();
+    this._seedTimers.set(infoHash, timer);
+  }
+
+  /**
+   * Destrói o torrent concluído (para upload/seed) mantendo os arquivos.
+   * Erros não propagam: o download já terminou — pior caso é seguir semeando.
+   */
+  _stopSeedingNow(torrentInfo) {
+    const torrent = torrentInfo?.torrent;
+    const label = torrentInfo?.name ?? torrentInfo?.infoHash;
+    try {
+      if (!torrent || torrent.destroyed) {
+        this._log("info", `Seed já encerrado para "${label}"`);
+        return;
+      }
+      torrentInfo.status = "seed-stopped";
+      torrent.destroy({ destroyStore: false }, (err) => {
+        if (err) {
+          this._log("warn", `Falha ao encerrar seed de "${label}": ${err.message}`);
+        } else {
+          this._log("info", `🌱→🛑 Seed encerrado: "${label}" (arquivos preservados)`);
+        }
+        this.emit("seed-stopped", torrentInfo);
+        this.saveState();
+      });
+    } catch (err) {
+      this._log("warn", `Erro ao encerrar seed de "${label}": ${err.message}`);
+    }
+  }
+
+  /**
    * Encontra o arquivo de vídeo principal
    */
   findMainVideoFile(files) {
@@ -652,6 +729,10 @@ class DownloadManager extends EventEmitter {
     if (this.saveInterval) {
       clearInterval(this.saveInterval);
     }
+
+    // Cancelar todos os timers anti-seed pendentes
+    for (const timer of this._seedTimers.values()) clearTimeout(timer);
+    this._seedTimers.clear();
 
     // Salvar estado final
     this.saveState();

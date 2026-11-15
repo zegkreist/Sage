@@ -9,7 +9,8 @@
   "torrent": {
     "maxConnections": 100,
     "downloadLimit": -1,
-    "uploadLimit": -1
+    "uploadLimit": -1,
+    "seedMinutes": 2
   },
   "search": {
     "providers": ["1337x", "ThePirateBay", "KickassTorrents", "Limetorrents", "Rarbg", "Yts", "Torrentz2", "Eztv", "TorrentProject"],
