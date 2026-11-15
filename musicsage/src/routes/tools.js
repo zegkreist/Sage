@@ -25,6 +25,7 @@ import http from "http";
 import https from "https";
 import { logger } from "../logger.js";
 import axios from "axios";
+import { TransportQueue } from "../../agents/Transporter/src/queue.js";
 
 const _httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -168,14 +169,20 @@ async function getDmInstance() {
     _dmInstance = new _DownloadManagerClass(loadStormbringerConfig());
     _dmInstance.setLogger((level, msg) => logger[level]("STORMBRINGER", msg));
     // Fila unificada: torrent concluído/falho vai pro histórico e dispara
-    // o Transporter automaticamente (se o toggle estiver ligado)
+    // o Transporter automaticamente (se o toggle estiver ligado).
+    // Fix: enfileira SOMENTE o item concluído (não varre a pasta geral —
+    // isso movia arquivos parciais de outros torrents em andamento).
+    // Guard B: se ainda há torrent baixando, a fila adia o transporte.
     _dmInstance.on("completed", (ti) => {
       _pushQueueHistory({ source: "torrent", id: ti?.infoHash, title: ti?.name, status: "done" });
       _resolveHermes(ti?.metadata?.hermesId, ti?.name, "torrent");
       if (!_autoTransporter) return;
       const typeMap = { music: "music", movie: "movies", movies: "movies", series: "series", tv: "series" };
       const target = typeMap[ti?.type];
-      if (target) runTransporter(target, { auto: true });
+      if (!target) return;
+      const downloadPath = _dmInstance.getDownloadPath(ti?.type);
+      const itemPath = ti?.name ? join(downloadPath, ti.name) : downloadPath;
+      getAutoTransporterQueue().enqueue({ type: target, path: itemPath });
     });
     _dmInstance.on("error", ({ torrentInfo, error } = {}) => {
       _pushQueueHistory({
@@ -219,14 +226,51 @@ function _writeJsonSafe(file, data) {
 }
 let _autoTransporter = _readJsonSafe(_SETTINGS_FILE, {}).autoTransporter !== false;
 
+// ── Auto-Transporter: fila de eventos + guard de atividade (A + B) ─────────
+let _autoTransporterQueue = null;
+function getAutoTransporterQueue() {
+  if (!_autoTransporterQueue) {
+    _autoTransporterQueue = new TransportQueue({
+      debounceMs: 30_000,
+      manifestFile: join(_DATA_DIR, "auto-transporter-pending.json"),
+      // Guard B: NÃO despacha enquanto algum torrent estiver baixando.
+      // Mover agora poderia pegar parciais do download ativo (a pasta alvo
+      // pode conter arquivos ainda sendo escritos pelo webtorrent).
+      hasActiveDownloads: () => {
+        try {
+          const dm = _dmInstance;
+          if (!dm) return false;
+          return dm.getActiveTorrents().some((t) => t.status === "downloading");
+        } catch {
+          return false;
+        }
+      },
+      activeRetryMs: 60_000,
+      // Consumo: agrupa por tipo e roda o run.js com --targets (json).
+      onDispatch: (groups) => {
+        for (const g of groups) {
+          const targetsJson = JSON.stringify(g.paths.map((p) => ({ type: g.type, path: p })));
+          const run = runTransporter(g.type, { auto: true, targets: targetsJson });
+          // Falhou ao despachar (já rodando)? Re-enfileira para tentar depois.
+          if (!run) _autoTransporterQueue.requeue([g]);
+        }
+      },
+      onLog: (msg, data) => logger.info("SERVER", `AutoTransporter: ${msg}${data ? ` — ${JSON.stringify(data)}` : ""}`),
+    });
+  }
+  return _autoTransporterQueue;
+}
+
+
 function _pushQueueHistory(entry) {
   const hist = _readJsonSafe(_QUEUE_HISTORY_FILE, []);
   hist.unshift({ ...entry, finishedAt: entry.finishedAt || new Date().toISOString() });
   _writeJsonSafe(_QUEUE_HISTORY_FILE, hist.slice(0, _QUEUE_HISTORY_MAX));
 }
 
-/** Executa o Transporter rastreado (status + histórico). Dedup por target. */
-function runTransporter(type, { auto = false } = {}) {
+/** Executa o Transporter rastreado (status + histórico). Dedup por target.
+ *  opts.targets: JSON string de [{type,path}] — modo alvo (só itens concluídos). */
+function runTransporter(type, { auto = false, targets = null } = {}) {
   for (const r of _transporterRuns.values()) {
     if (r.status === "running" && r.type === type) {
       logger.info("SERVER", `Transporter (${type}) já em andamento — gatilho ${auto ? "automático" : "manual"} ignorado`);
@@ -234,7 +278,7 @@ function runTransporter(type, { auto = false } = {}) {
     }
   }
   const flagMap = { music: ["--music"], movies: ["--movies"], series: ["--series"], all: [] };
-  const flags = flagMap[type] ?? ["--music"];
+  const flags = targets ? ["--targets", targets] : (flagMap[type] ?? ["--music"]);
   const id = randomUUID();
   const run = {
     id, source: "transporter", type,
@@ -438,6 +482,7 @@ function startTidalJob(ids, meta, artistName, kind = "album", hermesId = null) {
           if (entry) {
             entry.status = parsed.ok ? "done" : "error";
             if (parsed.error) entry.lastError = parsed.error;
+            if (parsed.output) entry.output = parsed.output;
             if (parsed.tracksExpected != null) {
               entry.tracksExpected = parsed.tracksExpected;
               entry.tracksDownloaded = parsed.tracksDownloaded;
@@ -475,7 +520,16 @@ function startTidalJob(ids, meta, artistName, kind = "album", hermesId = null) {
     if (job.lastError) logger.warn("SERVER", `TideCaller stderr jobId=${jobId}: ${job.lastError}`);
     _pushQueueHistory({ source: "tidal", id: jobId, title: label, status: job.status, finishedAt: job.finishedAt, error: job.lastError });
     // Fila unificada: downloads do Tidal prontos → transporta pra biblioteca
-    if (_autoTransporter && job.status === "done") runTransporter("music", { auto: true });
+    // (passa pela mesma fila/guard dos torrents — só itens concluídos)
+    if (_autoTransporter && job.status === "done") {
+      for (const a of job.albums.filter((x) => x.status === "done")) {
+        const p = a.output || a.path || a.dir;
+        getAutoTransporterQueue().enqueue({ type: "music", path: p || join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller") });
+      }
+      if (!job.albums.some((x) => x.status === "done")) {
+        getAutoTransporterQueue().enqueue({ type: "music", path: join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller") });
+      }
+    }
     // Só conclui o pedido do Hermes se deu certo de verdade — item com erro
     // continua no requests.md para ser re-tentado.
     if (job.status === "done") _resolveHermes(job.hermesId, label, "tidal");

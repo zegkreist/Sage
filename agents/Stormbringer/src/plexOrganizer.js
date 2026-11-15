@@ -19,6 +19,7 @@ import {
   removeIfEmpty,
   saveCoverArt,
   findExistingAlbumDir,
+  findExistingShowDir,
 } from "@plex-agents/transporter";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -224,9 +225,17 @@ class PlexOrganizer {
     const { showName, season, episode, year, episodeTitle } = episodeInfo;
     const ext = path.extname(sourceFile);
 
-    // Formato Plex: /TV Shows/Show Name (Year)/Season 01/Show Name - s01e01 - Episode Title.ext
-    const showFolderName = year ? `${showName} (${year})` : showName;
-    const showFolder = path.join(this.destSeries, this.sanitizeName(showFolderName));
+    // Fuzzy: reusar pasta do show já existente na biblioteca, mesmo se a
+    // grafia do episódio diverge levemente ("Show.Name.2020" vs "Show Name").
+    const existing = findExistingShowDir(showName, this.destSeries);
+    let showFolder;
+    if (existing) {
+      showFolder = existing;
+      console.log(`   🔁 Série existente (fuzzy): "${path.basename(existing)}" ← "${showName}"`);
+    } else {
+      const showFolderName = year ? `${showName} (${year})` : showName;
+      showFolder = path.join(this.destSeries, this.sanitizeName(showFolderName));
+    }
     const seasonFolder = path.join(showFolder, `Season ${String(season).padStart(2, "0")}`);
 
     let episodeFileName = `${this.sanitizeName(showName)} - s${String(season).padStart(2, "0")}e${String(episode).padStart(2, "0")}`;

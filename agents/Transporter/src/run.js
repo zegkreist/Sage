@@ -24,13 +24,18 @@
  *   node src/run.js --movies     → apenas filmes (torrents)
  *   node src/run.js --series     → apenas séries (torrents)
  *   node src/run.js --video      → filmes e séries via plexOrganizer.js (legado)
+ *   node src/run.js --targets <file|json> → SOMENTE as pastas/itens concluídos
+ *       (usado pelo auto-transporter: [{type:"music",path:"/downloads/..."}])
+ *       Sem varredura geral — torrents ainda baixando não são tocados.
  */
 
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { MusicOrganizer } from "./musicOrganizer.js";
 import { MovieOrganizer } from "./movieOrganizer.js";
+import { isReleaseFolder, parseAlbumFolderName } from "./audio.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +50,24 @@ const onlyVideo = args.includes("--video");
 const onlyMovies = args.includes("--movies");
 const onlySeries = args.includes("--series");
 const verbose = args.includes("--verbose") || args.includes("-v");
+
+/**
+ * Modo alvo: --targets '<json>' ou --targets /caminho/manifest.json
+ * Processa apenas os itens concluídos (nada de varredura geral da pasta).
+ * @returns {Array<{type:string, path:string}>|null}
+ */
+function parseTargets() {
+  const idx = args.indexOf("--targets");
+  if (idx === -1) return null;
+  const raw = args[idx + 1];
+  if (!raw) throw new Error("--targets requer JSON ou caminho de manifest");
+  let text = raw;
+  if (fs.existsSync(raw)) text = fs.readFileSync(raw, "utf8");
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed)) throw new Error("--targets: esperado array de {type, path}");
+  return parsed.filter((t) => t?.path);
+}
+const targetItems = parseTargets(); // null = modo legado (varredura por pasta)
 
 const C = {
   reset: "\x1b[0m",
@@ -123,15 +146,77 @@ async function runVideo() {
   await spawnAsync("node", ["src/plexOrganizer.js", ...extraArgs], stormbringerDir, "Vídeo — filmes e séries (Torrent → library)");
 }
 
+// ── Modo alvo (auto-transporter): processa SOMENTE itens concluídos ────────
+
+/** Processa um item específico (pasta de release/álbum OU arquivo solto). */
+async function processTarget(item) {
+  const targetPath = path.resolve(item.path);
+  const type = item.type || "music";
+  if (!fs.existsSync(targetPath)) {
+    console.log(`⚠️  Alvo não existe (já movido?): ${targetPath}`);
+    return;
+  }
+  const st = fs.statSync(targetPath);
+
+  if (type === "music") {
+    const organizer = new MusicOrganizer(path.join(PLEX_MEDIA_PATH, "music"), { dryRun, verbose });
+    if (st.isFile()) {
+      await organizer._moveLooseTrack(targetPath, "Auto");
+    } else if (isReleaseFolder(targetPath)) {
+      // A própria pasta é a release → mover direto (processSource iteraria
+      // os arquivos internos e os trataria como faixas soltas — errado).
+      const info = parseAlbumFolderName(path.basename(targetPath));
+      await organizer._moveRelease(targetPath, info.artist, info.album, info.year, "Auto");
+    } else {
+      // Pasta de artista (Artist/Album/...) ou raiz de fonte: mesma lógica
+      const label = path.dirname(targetPath).includes("tidecaller") ? "TideCaller" : "Stormbringer";
+      await organizer.processSource(targetPath, label);
+    }
+    organizer.printStats();
+    return;
+  }
+
+  if (type === "movies") {
+    const organizer = new MovieOrganizer(path.join(PLEX_MEDIA_PATH, "movies"), { dryRun, verbose });
+    if (st.isFile()) organizer._processVideoFile(targetPath, path.basename(targetPath));
+    else organizer._processMovieFolder(targetPath, path.basename(targetPath));
+    organizer.printStats();
+    return;
+  }
+
+  // Séries: sem caminho granular (plexOrganizer faz varredura própria) —
+  // cai no fluxo legado, que é seguro pois séries ficam em pasta separada
+  // e o guard de atividade (lado do servidor) já evitou concorrência.
+  const extraArgs = dryRun ? ["--dry-run"] : ["--yes", "--series-only"];
+  const stormbringerDir = process.env.STORMBRINGER_DIR || path.join(path.resolve(__dirname, "../../.."), "agents", "Stormbringer");
+  await spawnAsync("node", ["src/plexOrganizer.js", ...extraArgs], stormbringerDir, "Séries (Torrent → library)");
+}
+
+async function runTargets() {
+  console.log(`\n${C.bold}🎯 Modo alvo — ${targetItems.length} item(ns) concluído(s)${C.reset}\n`);
+  for (const item of targetItems) {
+    try {
+      await processTarget(item);
+    } catch (err) {
+      console.error(`${C.red}✗ Falha ao transportar ${item.path}: ${err.message}${C.reset}`);
+    }
+  }
+}
+
 async function main() {
   console.log(`\n${C.bold}🚚 TRANSPORTER — Mover downloads para a biblioteca do Plex${C.reset}\n`);
   if (dryRun) {
     console.log(`${C.yellow}🔍 Modo DRY RUN — nenhum arquivo será movido${C.reset}\n`);
   }
 
-  const runAll = !onlyMusic && !onlyVideo && !onlyMovies && !onlySeries;
-
   try {
+    if (targetItems) {
+      await runTargets();
+      console.log(`\n${C.bold}${C.green}✅ Transporter concluído!${C.reset}\n`);
+      return;
+    }
+
+    const runAll = !onlyMusic && !onlyVideo && !onlyMovies && !onlySeries;
     if (runAll || onlyMusic) await runMusic();
     if (runAll || onlyMovies) await runMovies();
     if (runAll || onlySeries) await runSeries();

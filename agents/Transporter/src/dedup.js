@@ -37,3 +37,44 @@ export function findExistingAlbumDir(artist, album, artistDir, processedAlbums) 
 
   return null;
 }
+
+/**
+ * Procura pasta de série (show) já existente no destino com nome equivalente.
+ *
+ * Episódios do mesmo show chegam com grafias levemente diferentes
+ * ("Show Name", "Show.Name.2020", "Show Name (2020) 1080p") — sem fuzzy,
+ * cada grafia viraria uma pasta separada na biblioteca.
+ *
+ * Estratégia:
+ *  1. Normaliza ambos os lados (remove acentos/ano/artefatos) e compara
+ *     igualdade exata — cobre a maioria dos casos baratos.
+ *  2. Similaridade fuzzy ≥ 0.9 (limiar mais alto que álbuns: nomes de
+ *     série são curtos e colidem fácil — ex "Friends" vs "Frends" não
+ *     passa, mas "The Office US" vs "The Office" passa).
+ *
+ * @param {string} showName  - Nome parseado do episódio
+ * @param {string} seriesDir - Raiz das séries no destino (ex: /media/tv)
+ * @param {number} [threshold=0.9]
+ * @returns {string|null} Caminho da pasta existente, ou null
+ */
+export function findExistingShowDir(showName, seriesDir, threshold = 0.9) {
+  const normalizedShow = normalizeForComparison(showName)
+    // Ano solto no fim ("Breaking Bad 2014", grafias de release sem parênteses)
+    .replace(/\d{4}$/, "");
+  if (!normalizedShow || !fs.existsSync(seriesDir)) return null;
+
+  for (const sub of fs.readdirSync(seriesDir)) {
+    const subPath = path.join(seriesDir, sub);
+    try {
+      if (!fs.statSync(subPath).isDirectory()) continue;
+    } catch { continue; }
+
+    const normalizedSub = normalizeForComparison(sub).replace(/\d{4}$/, "");
+    if (normalizedSub === normalizedShow) return subPath;
+
+    const sim = calculateSimilarity(normalizedShow, normalizedSub);
+    if (sim >= threshold) return subPath;
+  }
+
+  return null;
+}
