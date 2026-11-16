@@ -25,7 +25,7 @@ import http from "http";
 import https from "https";
 import { logger } from "../logger.js";
 import axios from "axios";
-import { TransportQueue } from "../../agents/Transporter/src/queue.js";
+import { TransportQueue } from "../../../agents/Transporter/src/queue.js";
 
 const _httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
