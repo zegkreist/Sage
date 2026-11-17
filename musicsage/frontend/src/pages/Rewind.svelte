@@ -10,6 +10,7 @@
 
   import Spinner  from '../components/ui/Spinner.svelte';
   import StatCard from '../components/ui/StatCard.svelte';
+  import ShareStoryModal from '../components/ui/ShareStoryModal.svelte';
 
   const PERIODS = [
     { key: 'week',  label: '7 dias'   },
@@ -22,6 +23,7 @@
   let userId = $state(null);   // null = todos os usuários
   let metrics = $state(null);
   let loading = $state(true);
+  let showShare = $state(false);
 
   // ── Leitura/escrita dos filtros na URL ─────────────────────
   function readFiltersFromHash() {
@@ -132,6 +134,12 @@
           >{p.label}</button>
         {/each}
       </div>
+      <!-- Botão de Stories (PNG 1080×1920) -->
+      <button
+        class="text-2xs px-3 py-1.5 rounded-lg transition-colors"
+        style="background:rgba(124,106,245,0.14);color:var(--accent-hi);border:1px solid rgba(124,106,245,0.3)"
+        onclick={() => { showShare = true; }}
+      >⬆ Story</button>
       <button
         class="text-2xs px-3 py-1.5 rounded-lg transition-colors"
         style="background:var(--surface2);color:#5a5a78;border:1px solid #1e1e2e"
@@ -233,3 +241,14 @@
   {/if}
 
 </div>
+
+<!-- ── Modal de Stories ─────────────────────────────────── -->
+<ShareStoryModal
+  bind:show={showShare}
+  initTab="artists"
+  artists={metrics?.topArtists ?? []}
+  tracks={metrics?.topTracks ?? []}
+  curiosidades={[]}
+  summary={metrics?.summary ?? null}
+  {period}
+/>
