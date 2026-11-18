@@ -648,6 +648,11 @@ def cmd_download_albums(album_ids: list[str]):
             else:
                 err_msg = last_combined[-500:] if last_combined else None
 
+            # FIX: o chamador (musicsage) usava 'output' (stdout tail) como PATH do álbum —
+            # linhas de warning do streamrip viravam "paths" inválidos e o Transporter não
+            # movia nada. O caminho real sai de _find_album_folder, não do stdout.
+            album_folder = str(_find_album_folder(download_dir, album)) if ok else None
+
             results.append({
                 "albumId": aid, "ok": ok, "url": url,
                 "quality": used_quality,
@@ -655,6 +660,7 @@ def cmd_download_albums(album_ids: list[str]):
                 "tracksDownloaded": downloaded,
                 "complete": complete,
                 "error": err_msg,
+                "path": album_folder,
                 "output": last_combined[-300:] if ok else None,
             })
         except Exception as e:

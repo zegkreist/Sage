@@ -483,6 +483,7 @@ function startTidalJob(ids, meta, artistName, kind = "album", hermesId = null) {
             entry.status = parsed.ok ? "done" : "error";
             if (parsed.error) entry.lastError = parsed.error;
             if (parsed.output) entry.output = parsed.output;
+            if (parsed.path) entry.path = parsed.path;
             if (parsed.tracksExpected != null) {
               entry.tracksExpected = parsed.tracksExpected;
               entry.tracksDownloaded = parsed.tracksDownloaded;
@@ -522,12 +523,23 @@ function startTidalJob(ids, meta, artistName, kind = "album", hermesId = null) {
     // Fila unificada: downloads do Tidal prontos → transporta pra biblioteca
     // (passa pela mesma fila/guard dos torrents — só itens concluídos)
     if (_autoTransporter && job.status === "done") {
+      const downloadsRoot = join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller");
+      let transported = 0;
       for (const a of job.albums.filter((x) => x.status === "done")) {
-        const p = a.output || a.path || a.dir;
-        getAutoTransporterQueue().enqueue({ type: "music", path: p || join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller") });
+        // FIX: usar o path REAL reportado pelo TideCaller (parsed.path, vindo de
+        // _find_album_folder). Antes usava a.output (tail do stdout do streamrip) —
+        // linhas de warning viravam "paths" inexistentes e o transporte era um no-op
+        // silencioso com exit 0 (Saint Vitus ficou preso em /downloads/tidecaller).
+        const p = a.path || a.dir;
+        if (p && existsSync(p)) {
+          getAutoTransporterQueue().enqueue({ type: "music", path: p });
+          transported++;
+        } else {
+          logger.warn("SERVER", `TideCaller → Transporter: path do álbum "${a.name}" inválido ou inexistente (${p || "vazio"}) — álbum NÃO transportado. Verificar parsed.path do TideCaller.`);
+        }
       }
-      if (!job.albums.some((x) => x.status === "done")) {
-        getAutoTransporterQueue().enqueue({ type: "music", path: join(process.env.DOWNLOADS_DIR || "/downloads", "tidecaller") });
+      if (transported === 0) {
+        logger.warn("SERVER", `TideCaller job ${jobId}: nenhum álbum com path válido para transportar — nenhum despacho feito.`);
       }
     }
     // Só conclui o pedido do Hermes se deu certo de verdade — item com erro

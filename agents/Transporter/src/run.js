@@ -153,8 +153,12 @@ async function processTarget(item) {
   const targetPath = path.resolve(item.path);
   const type = item.type || "music";
   if (!fs.existsSync(targetPath)) {
-    console.log(`⚠️  Alvo não existe (já movido?): ${targetPath}`);
-    return;
+    // FIX: alvo inexistente vira ERRO, não aviso — "já movido?" era uma suposição
+    // otimista; um path lixo do chamador (ex: stdout parseado) passava despercebido
+    // como no-op e o item nunca chegava à biblioteca. Retornando failure o run.js
+    // sai com exit != 0 e o status no musicsage mostra o problema.
+    console.error(`❌ Alvo não existe: ${targetPath} (type=${type})`);
+    return { ok: false, skipped: true, path: targetPath };
   }
   const st = fs.statSync(targetPath);
 
@@ -194,12 +198,21 @@ async function processTarget(item) {
 
 async function runTargets() {
   console.log(`\n${C.bold}🎯 Modo alvo — ${targetItems.length} item(ns) concluído(s)${C.reset}\n`);
+  let failures = 0;
   for (const item of targetItems) {
     try {
-      await processTarget(item);
+      const res = await processTarget(item);
+      if (res && res.ok === false) failures++;
     } catch (err) {
       console.error(`${C.red}✗ Falha ao transportar ${item.path}: ${err.message}${C.reset}`);
+      failures++;
     }
+  }
+  // FIX: sair com erro se algum alvo era inválido — exit 0 mascarava o problema
+  // (paths lixo do TideCaller passavam como "transporte bem-sucedido").
+  if (failures > 0) {
+    console.error(`${C.red}${failures} alvo(s) falharam${C.reset}`);
+    process.exitCode = 1;
   }
 }
 
